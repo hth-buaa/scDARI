@@ -10,7 +10,8 @@ filter_iGRN_by_ChIP_Atlas_priors(
   theta_i_top_quantile = 0.15,
   theta_i_top_n = 50,
   theta_i_absolute_min = 0.05,
-  TG_rescue_number = 1
+  TG_rescue_number = 1,
+  ncores = 1
 )
 }
 \arguments{
@@ -36,6 +37,10 @@ transform (before re-normalization); values below it are set to zero. Defaults t
 each target gene after dual-threshold QC. TGs with fewer non-zero edges have their top pre-QC
 (post-correction) edges restored. Internally capped at the number of TFs. Set \code{0} to disable.
 Defaults to \code{1}.}
+
+\item{ncores}{Positive integer. Number of cores for parallel processing via
+\code{\link[parallel]{mclapply}}.
+Defaults to 1; set to 1 on Windows.}
 }
 \value{
 A named list of the same structure as the input, containing refined iGRN data frames for
@@ -54,7 +59,10 @@ It performs prior-weighted edge correction, dual-threshold quality control with 
 balancing network sparsity with numerical stability for downstream dynamic modeling.
 }
 \details{
-The pipeline is applied independently to each cell type, in three stages.
+The pipeline is applied independently to each cell type, in three stages. Cell types are
+independent and are processed in parallel when a fork-capable platform is available. All
+per-TF and per-TG operations are evaluated as vectorized matrix operations, which gives the
+same numerical results as the element-wise implementation while being substantially faster.
 
 \enumerate{
 \item \strong{Prior-weighted edge correction}
@@ -106,14 +114,22 @@ genes from losing all regulators during aggressive sparsification.
 \examples{
 \dontrun{
 interest_cell_type_iGRN = base::readRDS("./3 get iGRN/interest_cell_type_iGRN.rds")
-
+ncores = if (.Platform$OS.type == "unix") {
+  base::max(1L, base::min(
+    parallel::detectCores(logical = FALSE) - 1L,
+    base::length(interest_cell_type_iGRN)
+  ))
+} else {
+  1L
+}
 interest_cell_type_iGRN = filter_iGRN_by_ChIP_Atlas_priors(
   interest_cell_type_iGRN = interest_cell_type_iGRN,
   min_scale = 0.2,
   theta_i_top_quantile = 0.15,
   theta_i_top_n = 50,
   theta_i_absolute_min = 0.05,
-  TG_rescue_number = 1
+  TG_rescue_number = 1,
+  ncores = ncores
 )
 
 base::saveRDS(

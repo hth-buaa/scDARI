@@ -21,6 +21,9 @@
 #' each target gene after dual-threshold QC. TGs with fewer non-zero edges have their top pre-QC
 #' (post-correction) edges restored. Internally capped at the number of TFs. Set \code{0} to disable.
 #' Defaults to \code{1}.
+#' @param ncores Positive integer. Number of cores for parallel processing via
+#'   \code{\link[parallel]{mclapply}}.
+#' Defaults to 1; set to 1 on Windows.
 #'
 #' @return A named list of the same structure as the input, containing refined iGRN data frames for
 #' each cell type. Each matrix has been prior-weighted, quality-controlled and transformed:
@@ -33,7 +36,10 @@
 #' }
 #'
 #' @details
-#' The pipeline is applied independently to each cell type, in three stages.
+#' The pipeline is applied independently to each cell type, in three stages. Cell types are
+#' independent and are processed in parallel when a fork-capable platform is available. All
+#' per-TF and per-TG operations are evaluated as vectorized matrix operations, which gives the
+#' same numerical results as the element-wise implementation while being substantially faster.
 #'
 #' \enumerate{
 #'   \item \strong{Prior-weighted edge correction}
@@ -87,14 +93,22 @@
 #' @examples
 #' \dontrun{
 #' interest_cell_type_iGRN = base::readRDS("./3 get iGRN/interest_cell_type_iGRN.rds")
-#'
+#' ncores = if (.Platform$OS.type == "unix") {
+#'   base::max(1L, base::min(
+#'     parallel::detectCores(logical = FALSE) - 1L,
+#'     base::length(interest_cell_type_iGRN)
+#'   ))
+#' } else {
+#'   1L
+#' }
 #' interest_cell_type_iGRN = filter_iGRN_by_ChIP_Atlas_priors(
 #'   interest_cell_type_iGRN = interest_cell_type_iGRN,
 #'   min_scale = 0.2,
 #'   theta_i_top_quantile = 0.15,
 #'   theta_i_top_n = 50,
 #'   theta_i_absolute_min = 0.05,
-#'   TG_rescue_number = 1
+#'   TG_rescue_number = 1,
+#'   ncores = ncores
 #' )
 #'
 #' base::saveRDS(
@@ -108,7 +122,8 @@ filter_iGRN_by_ChIP_Atlas_priors = function(
     theta_i_top_quantile = 0.15,
     theta_i_top_n = 50,
     theta_i_absolute_min = 0.05,
-    TG_rescue_number = 1
+    TG_rescue_number = 1,
+    ncores = 1
 ) {
   ### Validate inputs.
   if (!base::is.list(interest_cell_type_iGRN) || base::length(interest_cell_type_iGRN) == 0) {
@@ -135,7 +150,8 @@ filter_iGRN_by_ChIP_Atlas_priors = function(
       TG_rescue_number < 0 || TG_rescue_number != base::round(TG_rescue_number)) {
     base::stop("'TG_rescue_number' must be a single non-negative integer.")
   }
-  if (!base::is.numeric(min_scale) || base::length(min_scale) == 1 && min_scale <= 0) {
+  if (!base::is.numeric(min_scale) || base::length(min_scale) != 1 ||
+      base::is.na(min_scale) || min_scale <= 0) {
     base::stop("'min_scale' must be a single positive number.")
   }
   if (min_scale > 1) {
@@ -152,9 +168,12 @@ filter_iGRN_by_ChIP_Atlas_priors = function(
     message("Folder created: ", new_folder, ".")
   } else {message("Folder already exists: ", new_folder, ".")}
   base::setwd(new_folder)
+
+  # Restore the original working directory even if the function exits early on error.
+  base::on.exit(base::setwd(original_dir), add = TRUE)
   message("The current working directory has been switched to: ", base::getwd(), ".")
 
-  ### Read the preprocessed ChIP-Atlas priors.
+  ### Read the preprocessed ChIP-Atlas priors once for all cell types.
   priors_path = base::file.path(
     "..", "1.1 Data Preprocessing - Get TFs From Database",
     "ChIP_Atlas_Priors", "simplified_processed_priors.rds"
@@ -169,127 +188,136 @@ filter_iGRN_by_ChIP_Atlas_priors = function(
     base::stop("The prior file must contain a list keyed by TF (see get_TFs_from_priors()).")
   }
   rescue_n = TG_rescue_number # Keep the requested rescue count constant across cell types.
+  top_n = base::as.integer(theta_i_top_n)
 
-  ### Refine each cell type.
-  for (cell_type in base::names(interest_cell_type_iGRN)) {
-    message("[", cell_type, "] Correcting iGRN weights with prior intensity.")
-    igrn = interest_cell_type_iGRN[[cell_type]]
+  # Refine one cell type using vectorized matrix operations (same math as the column/row loops).
+  refine_cell_type = function(igrn) {
     if (!base::is.data.frame(igrn)) {
       igrn = base::as.data.frame(igrn, optional = TRUE)
     }
-    nTF = base::ncol(igrn)
+    M = base::as.matrix(igrn)
+    base::storage.mode(M) = "double"
+    nTG = base::nrow(M)
+    nTF = base::ncol(M)
+    if (nTG == 0L || nTF == 0L) {
+      return(igrn[FALSE, FALSE, drop = FALSE])
+    }
+    tg_names = base::rownames(M)
+    tf_names = base::colnames(M)
 
-    # Stage 1: prior-weighted correction, one TF column at a time.
-    for (tf in base::colnames(igrn)) {
-      tf_tgs = igrn[, tf, drop = FALSE]
-      base::colnames(tf_tgs)[1] = "theta_i_before_fix"
-
-      # Min-max normalize the incoming scores with the min_scale-adjusted lower bound.
-      if (base::max(tf_tgs$theta_i_before_fix) == 0) {
-        tf_tgs$norm_theta_i_before_fix = 0
-      } else {
-        max_before = base::max(tf_tgs$theta_i_before_fix) + 0.0001
-        min_before = base::min(tf_tgs$theta_i_before_fix[tf_tgs$theta_i_before_fix > 0]) * min_scale
-        tf_tgs$norm_theta_i_before_fix =
-          (tf_tgs$theta_i_before_fix - min_before) / (max_before - min_before)
-        tf_tgs$norm_theta_i_before_fix[tf_tgs$norm_theta_i_before_fix < 0] = 0
+    # Build the TG x TF ChIP-seq prior-intensity matrix (missing entries become zero).
+    P = base::matrix(0, nrow = nTG, ncol = nTF,
+                     dimnames = base::list(tg_names, tf_names))
+    for (tf in tf_names) {
+      pr = priors_simplify[[tf]]
+      if (!base::is.null(pr)) {
+        vals = pr[tg_names, "intensity"]
+        vals[base::is.na(vals)] = 0
+        P[, tf] = vals
       }
-
-      # Multiply by ChIP-seq prior intensity (missing TF/TG entries receive zero).
-      if (!base::is.null(priors_simplify[[tf]])) {
-        tf_tgs$prior_intensity = priors_simplify[[tf]][base::rownames(tf_tgs), "intensity"]
-        tf_tgs$prior_intensity[base::is.na(tf_tgs$prior_intensity)] = 0
-      } else {
-        tf_tgs$prior_intensity = 0
-      }
-
-      # Square-root transform, then floor weak values.
-      tf_tgs$theta_i_after_fix = tf_tgs$norm_theta_i_before_fix * tf_tgs$prior_intensity
-      tf_tgs$theta_i_after_fix = tf_tgs$theta_i_after_fix ^ 0.5
-      tf_tgs$theta_i_after_fix[tf_tgs$theta_i_after_fix < theta_i_absolute_min] = 0
-
-      # Re-normalize with the same offset and a 1.1-fold ceiling so values stay below 1.
-      if (base::max(tf_tgs$theta_i_after_fix) > 0) {
-        max_after = base::max(tf_tgs$theta_i_after_fix) + 0.0001
-        min_after = base::min(tf_tgs$theta_i_after_fix[tf_tgs$theta_i_after_fix > 0]) * min_scale
-        tf_tgs$norm_theta_i_after_fix =
-          (tf_tgs$theta_i_after_fix - min_after) / (max_after * 1.1 - min_after)
-        tf_tgs$norm_theta_i_after_fix[tf_tgs$norm_theta_i_after_fix < 0] = 0
-      } else {
-        tf_tgs$norm_theta_i_after_fix = 0
-      }
-
-      igrn[, tf] = tf_tgs[base::rownames(igrn), "norm_theta_i_after_fix"]
     }
 
+    # Stage 1: prior-weighted correction, vectorized across all TFs.
+    # Per-TF min-max normalization of the incoming scores (non-positive entries ignored).
+    mx_before = base::apply(M, 2L, base::max)
+    M_pos = M
+    M_pos[M_pos <= 0] = NA_real_
+    mn_before = base::suppressWarnings(base::apply(M_pos, 2L, base::min, na.rm = TRUE))
+    max_before = mx_before + 0.0001
+    min_before = mn_before * min_scale
+    norm_before = base::sweep(M, 2L, min_before, "-")
+    norm_before = base::sweep(norm_before, 2L, max_before - min_before, "/")
+    norm_before[norm_before < 0] = 0
+    norm_before[, mx_before == 0] = 0
+    norm_before[!base::is.finite(norm_before)] = 0
+
+    # Multiply by prior intensity, square-root transform, and floor weak values.
+    theta_after = norm_before * P
+    theta_after = theta_after ^ 0.5
+    theta_after[theta_after < theta_i_absolute_min] = 0
+
+    # Re-normalize each TF with the same offset and a 1.1-fold ceiling.
+    mx_after = base::apply(theta_after, 2L, base::max)
+    A_pos = theta_after
+    A_pos[A_pos <= 0] = NA_real_
+    mn_after = base::suppressWarnings(base::apply(A_pos, 2L, base::min, na.rm = TRUE))
+    max_after = mx_after + 0.0001
+    min_after = mn_after * min_scale
+    M2 = base::sweep(theta_after, 2L, min_after, "-")
+    M2 = base::sweep(M2, 2L, max_after * 1.1 - min_after, "/")
+    M2[M2 < 0] = 0
+    M2[, mx_after == 0] = 0
+    M2[!base::is.finite(M2)] = 0
+
     # Without any prior-supported edge the matrix cannot be thresholded; return 0 x 0.
-    positive_theta = base::unlist(igrn)
-    positive_theta = positive_theta[positive_theta > 0]
-    if (base::length(positive_theta) == 0) {
-      message("[", cell_type, "] No prior-supported edge; returning a 0 x 0 matrix.")
-      interest_cell_type_iGRN[[cell_type]] = igrn[FALSE, FALSE, drop = FALSE]
-      next
+    if (!base::any(M2 > 0)) {
+      message("No prior-supported edge; returning a 0 x 0 matrix.")
+      return(igrn[FALSE, FALSE, drop = FALSE])
     }
 
     # Stage 2a: dual-threshold QC (per-TF top-N union global quantile).
-    message("[", cell_type, "] QC: keep per-TF top-", theta_i_top_n,
-            " or global top ", theta_i_top_quantile * 100, "%.")
+    positive_theta = M2[M2 > 0]
     min_theta = stats::quantile(x = positive_theta, probs = 1 - theta_i_top_quantile)
-    TGs = base::rownames(igrn)
+
+    # Per-TF cutoff equals the top-N-th largest positive value (ties included, matching
+    # rank(..., ties.method = "min")); TFs with fewer than N positives keep all of them.
+    boundary = base::apply(M2, 2L, function(v) {
+      vp = v[v > 0]
+      nv = base::length(vp)
+      if (nv == 0L) {
+        Inf
+      } else if (nv >= top_n) {
+        base::sort(vp, decreasing = TRUE)[top_n]
+      } else {
+        base::min(vp)
+      }
+    })
+    cutoff = base::pmin(min_theta, boundary)
+    keep = base::sweep(M2, 2L, cutoff, ">=")
+    Mqc = M2
+    Mqc[!keep] = 0
 
     # Pre-compute each TG's top pre-QC (post-correction) edges for the rescue step.
     k_rescue = base::min(rescue_n, nTF)
     if (rescue_n > 0) {
-      top_tf_cols = base::paste0("top_TF", base::seq_len(k_rescue))
-      top_theta_cols = base::paste0("top_theta_i", base::seq_len(k_rescue))
-      TG_rescue = base::data.frame(
-        base::matrix(NA_character_, nrow = base::length(TGs), ncol = k_rescue,
-                     dimnames = base::list(TGs, top_tf_cols)),
-        base::matrix(0, nrow = base::length(TGs), ncol = k_rescue,
-                     dimnames = base::list(TGs, top_theta_cols)),
-        check.names = FALSE
-      )
-      for (tg in TGs) {
-        top_TFs = base::colnames(igrn)[base::order(-base::as.numeric(igrn[tg, ]))][base::seq_len(k_rescue)]
-        TG_rescue[tg, top_tf_cols] = top_TFs
-        TG_rescue[tg, top_theta_cols] = base::as.numeric(igrn[tg, top_TFs])
+      if (k_rescue == 1L) {
+        # Vectorized argmax; ties resolve to the first TF, matching order(-v)[1].
+        top_idx = base::matrix(base::max.col(M2, ties.method = "first"), ncol = 1L)
+      } else {
+        top_idx = base::t(base::apply(M2, 1L, function(v) base::order(-v)[base::seq_len(k_rescue)]))
       }
-    }
+      row_rep = base::rep(base::seq_len(nTG), each = k_rescue)
+      top_col = base::as.vector(base::t(top_idx))
+      top_val = base::matrix(M2[base::cbind(row_rep, top_col)],
+                             nrow = nTG, ncol = k_rescue, byrow = TRUE)
 
-    # Per TF: retain edges passing either the top-N rank or the global quantile threshold.
-    for (tf in base::colnames(igrn)) {
-      tf_tgs_fixed = igrn[, tf, drop = FALSE]
-      tf_tgs_fixed = tf_tgs_fixed[tf_tgs_fixed[, 1] > 0, , drop = FALSE]
-      TGs_positive = base::rownames(tf_tgs_fixed)
-      tf_tgs_fixed$rank = base::rank(-tf_tgs_fixed[, 1], ties.method = "min")
-      TGs_by_top = TGs_positive[tf_tgs_fixed$rank <= theta_i_top_n]
-      TGs_by_min = TGs_positive[tf_tgs_fixed[, 1] >= min_theta]
-      TGs_remaining = base::union(TGs_by_top, TGs_by_min)
-      igrn[base::setdiff(TGs, TGs_remaining), tf] = 0
-    }
-
-    # Stage 2b: rescue TGs left with fewer than k_rescue non-zero regulators.
-    if (rescue_n > 0) {
-      message("[", cell_type, "] QC: rescuing TGs with fewer than ", k_rescue, " non-zero TF edge(s).")
-      for (tg in TGs) {
-        if (base::sum(base::as.numeric(igrn[tg, ]) > 0) < k_rescue) {
-          for (rn in base::seq_len(k_rescue)) {
-            igrn[tg, TG_rescue[tg, base::paste0("top_TF", rn)]] =
-              TG_rescue[tg, base::paste0("top_theta_i", rn)]
-          }
-        }
+      # Stage 2b: rescue TGs left with fewer than k_rescue non-zero regulators.
+      n_nonzero = base::rowSums(Mqc > 0)
+      rescue_rows = base::which(n_nonzero < k_rescue)
+      if (base::length(rescue_rows)) {
+        ri = base::rep(rescue_rows, each = k_rescue)
+        ci = base::as.vector(base::t(top_idx[rescue_rows, , drop = FALSE]))
+        vi = base::as.vector(base::t(top_val[rescue_rows, , drop = FALSE]))
+        Mqc[base::cbind(ri, ci)] = vi
       }
     }
 
     # Drop all-zero rows (TGs) and columns (TFs).
-    igrn = igrn[base::rowSums(igrn != 0) > 0, base::colSums(igrn != 0) > 0, drop = FALSE]
+    keep_row = base::rowSums(Mqc != 0) > 0
+    keep_col = base::colSums(Mqc != 0) > 0
+    Mqc = Mqc[keep_row, keep_col, drop = FALSE]
 
     # Stage 3: shift non-zero values above 0.1 while resetting exact zeros.
-    igrn = igrn * 0.9 + 0.1
-    igrn[igrn <= 0.1] = 0
-
-    interest_cell_type_iGRN[[cell_type]] = igrn
+    Mqc = Mqc * 0.9 + 0.1
+    Mqc[Mqc <= 0.1] = 0
+    base::as.data.frame(Mqc)
   }
+
+  ### Refine every cell type (in parallel on fork-capable platforms).
+  refined = parallel::mclapply(
+    interest_cell_type_iGRN, refine_cell_type, mc.cores = ncores
+  )
+  base::names(refined) = base::names(interest_cell_type_iGRN)
 
   ### End.
   base::setwd(original_dir)
@@ -297,5 +325,5 @@ filter_iGRN_by_ChIP_Atlas_priors = function(
   t_end = base::Sys.time()
   message("Finish: Filtering the global iGRN by ChIP-Atlas priors for each cell type. Time: ", t_end, ".")
   message("Running time: ", base::format(t_end - t_start))
-  return(interest_cell_type_iGRN)
+  return(refined)
 }
