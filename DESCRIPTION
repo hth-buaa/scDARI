@@ -1,0 +1,29 @@
+Package: scDARI
+Title: A Discrete Dynamical Model for Activating Gene Regulatory Network Inference from scRNA-seq Data
+Version: 1.0
+Authors@R: 
+    person(given = "Taihang", family = "Huang", email = "huangtaihang@buaa.edu.cn", role = c("aut", "cre"))
+Description: Implements the scDARI algorithm, a novel method for predicting Gene Regulatory Networks (GRNs) from scRNA-seq data and by modeling their discrete evolutionary dynamics along a pseudotemporal trajectory. This package provides a comprehensive toolkit for reconstructing developmental or disease progression pathways from transcriptomics snapshots.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    Seurat,
+    Matrix,
+    utils,
+    SeuratObject,
+    parallel,
+    minpack.lm,
+    stats,
+    ggplot2,
+    ggrepel,
+    monocle,
+    methods,
+    VGAM,
+    BiocGenerics,
+    Biobase,
+    parmigene,
+    data.table,
+    dplyr,
+    GA
