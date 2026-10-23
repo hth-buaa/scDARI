@@ -82,7 +82,7 @@
 #' )
 #' ncores = parallel::detectCores() - 1 # Linux
 #' # ncores = 1 # Windows
-#' interest_cell_type_pGRN = select_best_prediction(
+#' interest_cell_type_pGRN = select_best_prediction_old1(
 #'   interest_cell_type_pGRN = interest_cell_type_pGRN,
 #'   interest_cell_type_tau = interest_cell_type_tau,
 #'   interest_cell_type_genes_pseudotime_info = interest_cell_type_genes_pseudotime_info,
@@ -95,15 +95,17 @@
 #' )
 #' base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 #' }
-select_best_prediction_old = function (interest_cell_type_pGRN,
-                                       interest_cell_type_tau,
-                                       interest_cell_type_genes_pseudotime_info,
-                                       fit_loss_quantile_threshold = 0.2,
-                                       theta_p_quantile_threshold = 0.8,
-                                       fit_loss_upper = 999,
-                                       theta_p_lower = 0,
-                                       each = 1000000,
-                                       ncores = 1) {
+select_best_prediction_old1 = function(
+    interest_cell_type_pGRN,
+    interest_cell_type_tau,
+    interest_cell_type_genes_pseudotime_info,
+    fit_loss_quantile_threshold = 0.2,
+    theta_p_quantile_threshold = 0.8,
+    fit_loss_upper = 999,
+    theta_p_lower = 0,
+    each = 1000000,
+    ncores = 1
+) {
   ### Start.
   t_start = base::Sys.time()
   message("Run: Filtering GRN. Time: ", t_start, ".")

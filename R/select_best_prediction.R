@@ -15,33 +15,27 @@
 #'   \code{\link{get_genes_pseudotime_info}}, containing branch cell counts for
 #'   weighted integration.
 #' @param interest_cell_type_iGRN List. Output of \code{\link{calculate_iGRN}} or
-#'   \code{\link{filter_iGRN_by_ChIP_Atlas_priors}}. Cell-type-specific iGRN matrices, used
-#'   to retrieve the observed regulatory strength \code{theta_i}.
-#' @param Basic_Info List returned by \code{\link{get_expression_matrix}}. Basic information containing the Seurat object
-#'   \code{scRNAseq_for_GRN} from which gene-level expression features are
-#'   computed.
-#' @param interest_cell_type_tau Named numeric vector. Output of \code{\link{get_cell_type_tau}}. Cell-type-specific
-#'   binarization thresholds, used to shift normalized positive strengths above
-#'   \code{tau}.
-#' @param topn_max Positive integer. Maximum number of models averaged per
-#' pair.
+#'   \code{\link{filter_iGRN_by_ChIP_Atlas_priors}}, used to retrieve the
+#'   observed regulatory strength \code{theta_i}.
+#' @param Basic_Info List returned by \code{\link{get_expression_matrix}},
+#'   containing the Seurat object \code{scRNAseq_for_GRN} from which gene-level
+#'   expression features are computed.
+#' @param interest_cell_type_tau Named numeric vector. Output of
+#'   \code{\link{get_cell_type_tau}}, used to shift normalized positive
+#'   strengths above \code{tau}.
+#' @param topn_max Positive integer. Maximum number of models averaged per pair.
 #' Defaults to 25.
-#' @param topn_min Positive integer. Minimum number of models averaged per
-#' pair.
+#' @param topn_min Positive integer. Minimum number of models averaged per pair.
 #' Defaults to 5.
 #' @param topn_ratio Numeric between 0 and 1. Number of models averaged as a
-#' proportion of available trained models.
+#'   proportion of available trained models.
 #' Defaults to 0.1.
-#' @param fix_factor Numeric in (0, 1\]. Factor applied to the weights of
-#' boundary strengths, with 1 applying no down-weighting; must be strictly
-#' greater than 0.
+#' @param fix_factor Numeric in (0, 1]. Factor applied to the weights of
+#'   boundary strengths, with 1 applying no down-weighting.
 #' Defaults to 1.0.
-#' @param min_scale Numeric in (0, 1\]. Multiplier on the smallest positive
-#' value when setting the min-max lower bound, applied to strength and loss
-#' normalization.
-#' For strengths, \code{min_scale = 1} maps the weakest positive edge of a TF
-#' to \code{tau}, the strongest to just below 1, while absent pairs reset to 0;
-#' values below 1 keep the weakest edge slightly above \code{tau}.
+#' @param min_scale Numeric in (0, 1]. Multiplier on the smallest positive value
+#'   when setting the min-max lower bound, applied to strength and loss
+#'   normalization.
 #' Defaults to 0.99.
 #' @param each Positive integer. Maximum number of pairs per parallel chunk.
 #' Defaults to 1000000.
@@ -50,58 +44,19 @@
 #' Defaults to 1; set to 1 on Windows.
 #'
 #' @return The input list with a \code{pred_summary} frame per cell type.
-#' Its columns are:
-#' \itemize{
-#'   \item \code{TF}, \code{TG}: the pair identifiers.
-#'   \item \code{theta_p_branchN}, \code{loss_branchN}: branch-level averaged
-#'     strength and loss.
-#'   \item \code{FG.theta_p}, \code{FG.Loss}: cell-count weighted strength and
-#'     loss across branches.
-#'   \item \code{FG.theta_p_norm}, \code{FG.theta_p_norm.R}: within-TF
-#'     normalized strength and its rank.
-#'   \item \code{FG.Loss_norm}, \code{FG.Loss_norm.R}: within-TF normalized
-#'     loss and its rank.
-#'   \item \code{FG.theta_i}, \code{FG.theta_i.R}: observed strength and its
-#'     normalized rank, with rank 0 for \code{theta_i = 0}.
-#'   \item \code{F.*} and \code{G.*}: TF and TG expression features and their
-#'     normalized ranks, including non-zero ratio, non-zero average and overall
-#'     average.
-#' }
 #'
-#' @details For each cell type, the function proceeds as follows:
-#' \enumerate{
-#'   \item Computes shared gene expression features once from the normalized
-#'     scRNA-seq data.
-#'   \item Splits the pairs of each branch into chunks.
-#'   \item For each pair, selects \code{topn} lowest-loss models, where
-#'     \code{topn} is clamped to
-#'     \code{round(n_train * topn_ratio)} within \code{topn_min} and
-#'     \code{topn_max}.
-#'   \item Assigns triangular weights from loss, from 1 for the smallest loss to
-#'     0 for the largest, or equal weights when all selected losses tie;
-#'     weights of boundary strengths below 0.0101 or above 0.9899 are
-#'     multiplied by \code{fix_factor}.
-#'   \item Takes the weighted mean of the selected strengths and losses.
-#'   \item Merges chunks, suffixes columns by branch, and removes pairs with
-#'     strength below 0.011 or infinite loss.
-#'   \item Integrates branches by cell-count weights.
-#'   \item Normalizes strengths and losses within each TF: the lower bound is
-#'     the smallest positive value times \code{min_scale}, the upper bound is
-#'     the largest value plus 0.0001; positive strengths are shifted above
-#'     \code{tau}, while absent pairs reset to 0, and losses are scaled without
-#'     the shift.
-#'   \item Computes normalized ranks, fills the observed \code{theta_i} and its
-#'     rank, and attaches the gene features.
-#' }
+#' @details The per-pair "select top-n lowest-loss models and loss-weight them"
+#' operation is a pure row-wise reduction: the column permutation that orders
+#' the loss matrix is computed with \code{\link{apply}} (C-level ordering),
+#' the selected strengths and losses are gathered by linear indexing, and the
+#' triangular weights and weighted means are computed by matrix algebra. No
+#' per-pair R loop, per-pair list append, or duplicated chunk frames are built.
 #'
 #' @note
 #' \itemize{
 #'   \item The function creates and switches to the \code{5 Infer GRN}
 #'     directory, and restores the original working directory on exit.
-#'   \item \code{fix_factor} must be in (0, 1]; set it below 1 to discount
-#'     boundary predictions.
-#'   \item Boundary strengths near 0.01 or 0.99 reflect the optimization bounds
-#'     and are treated as less reliable.
+#'   \item \code{fix_factor} must be in (0, 1].
 #'   \item Reduce \code{each} if out-of-memory errors occur.
 #'   \item Parallel processing relies on \code{\link[parallel]{mclapply}};
 #'     set \code{ncores = 1} on Windows.
@@ -157,143 +112,148 @@ select_best_prediction = function(
     message("Folder already exists: ", new_folder, ".")
   }
   base::setwd(new_folder)
-  message("The current working directory has been switched to: ", base::getwd(), ".")
-  # Restore the working directory on normal exit or error.
   base::on.exit({
     base::setwd(original_dir)
     message("The working directory has been restored to: ", base::getwd(), ".")
   }, add = TRUE)
+  message("The current working directory has been switched to: ", base::getwd(), ".")
+
+  # Parameter validation.
+  if (!(base::is.numeric(fix_factor) && base::length(fix_factor) == 1 &&
+        fix_factor > 0 && fix_factor <= 1)) {
+    base::stop("'fix_factor' must be a single value in (0, 1].")
+  }
+  if (!(base::is.numeric(min_scale) && base::length(min_scale) == 1 &&
+        min_scale > 0 && min_scale <= 1)) {
+    base::stop("'min_scale' must be a single value in (0, 1].")
+  }
 
   ### Shared gene expression features, computed once for all cell types.
   message("Computing shared gene-level expression features.")
   scRNAseq = Seurat::NormalizeData(Basic_Info$scRNAseq_for_GRN, verbose = FALSE)
   rna_data = SeuratObject::GetAssayData(scRNAseq, layer = "data")
+  n_cell = base::ncol(rna_data)
   nonzero_n = Matrix::rowSums(rna_data > 0)
+  row_sum = Matrix::rowSums(rna_data)
   gene_features = base::data.frame(
-    nonzero_freq = nonzero_n / base::ncol(rna_data),
-    nonzero_mean = base::ifelse(nonzero_n > 0, Matrix::rowSums(rna_data) / nonzero_n, 0),
+    nonzero_freq = nonzero_n / n_cell,
+    nonzero_mean = base::ifelse(nonzero_n > 0, row_sum / nonzero_n, 0),
     overall_mean = Matrix::rowMeans(rna_data)
   )
-  gene_features[base::paste0(base::colnames(gene_features), "-norm_rank")] =
+  gene_features[paste0(colnames(gene_features), "-norm_rank")] =
     base::lapply(gene_features, function(x) {
       r = base::rank(x, ties.method = "min", na.last = "keep")
       r / base::max(r, na.rm = TRUE)
     })
+  # Named-vector views for fast feature attachment.
+  gf_named = base::lapply(gene_features, function(x) {
+    stats::setNames(base::as.numeric(x), base::rownames(gene_features))
+  })
 
   ### Process.
   for (cell_type in base::names(interest_cell_type_pGRN)) {
     branch_index = base::seq_along(
       interest_cell_type_genes_pseudotime_info[[cell_type]][["Branches_TFE"]]
     )
+    n_branch = base::length(branch_index)
+    if (n_branch < 1) base::stop("The number of branches is less than 1.")
     tau = base::as.numeric(interest_cell_type_tau[cell_type])
+    cell_weights = base::as.numeric(
+      interest_cell_type_genes_pseudotime_info[[cell_type]][["Branches_n_cell"]]
+    )
 
+    # Per-branch vectorized top-n selection.
+    branch_best_list = base::list()
     for (n in branch_index) {
       message("Process branch ", n, " in cell type ", cell_type, ".")
-      branch_result = interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]]
-      re_pred = base::rownames(branch_result[["theta_p"]])
-      N_pred_all = base::length(re_pred)
-      message("Branch ", n, " has ", N_pred_all, " candidate pairs.")
+      branch_result = interest_cell_type_pGRN[[cell_type]][[paste0("branch", n)]]
+      theta_p_mat = base::as.matrix(branch_result[["theta_p"]])
+      loss_mat = base::as.matrix(branch_result[["loss"]])
+      storage.mode(theta_p_mat) = "double"
+      storage.mode(loss_mat) = "double"
+      N = base::nrow(theta_p_mat); M = base::ncol(theta_p_mat)
+      message("Branch ", n, " has ", N, " candidate pairs.")
+      # Number of models averaged, clamped to [topn_min, topn_max] and M.
+      topn = base::min(base::max(base::round(M * topn_ratio), topn_min),
+                       topn_max, M)
 
-      # Split pairs into chunks.
-      n_part = base::ceiling(N_pred_all / each)
-      re_pred_list = base::list()
-      for (s in base::seq_len(n_part)) {
-        if (s != n_part) {
-          re_pred_list[[s]] = re_pred[(each * (s - 1) + 1):(each * s)]
-        } else {
-          re_pred_list[[s]] = re_pred[(each * (s - 1) + 1):N_pred_all]
-        }
+      # Column permutation ordering each row by loss; keep only the top-n.
+      # The ordering is the only R-level loop, so parallelize it across rows.
+      topn_order = function(mat) {
+        base::t(base::apply(mat, 1, function(x) base::order(x)[base::seq_len(topn)]))
       }
-
-      # Per-chunk inputs.
-      pGRN_list = base::list()
-      for (s in base::seq_len(n_part)) {
-        chunk_rows = re_pred_list[[s]]
-        pGRN_list[[s]] = base::list(
-          theta_p = branch_result[["theta_p"]][chunk_rows, , drop = FALSE],
-          loss = branch_result[["loss"]][chunk_rows, , drop = FALSE]
+      use_parallel = base::is.numeric(ncores) && ncores > 1 &&
+        .Platform$OS.type == "unix"
+      if (use_parallel) {
+        n_workers = base::as.integer(base::min(ncores, N))
+        block_size = base::ceiling(N / n_workers)
+        chunk_id = ((base::seq_len(N) - 1L) %/% block_size) + 1L
+        row_chunks = base::split(base::seq_len(N), chunk_id)
+        order_list = parallel::mclapply(
+          X = row_chunks,
+          FUN = function(idx) topn_order(loss_mat[idx, , drop = FALSE]),
+          mc.cores = n_workers
         )
-      }
-
-      # Number of models averaged, clamped to [topn_min, topn_max] and n_train.
-      n_train = base::ncol(branch_result[["theta_p"]])
-      topn = base::min(base::max(base::round(n_train * topn_ratio), topn_min),
-                       topn_max, n_train)
-
-      # Combine the topn lowest-loss models for every pair in one chunk.
-      process_data_slice = function(pGRN_info, topn, fix_factor) {
-        theta_frame = pGRN_info[["theta_p"]]
-        loss_frame = pGRN_info[["loss"]]
-        for (re in base::rownames(theta_frame)) {
-          theta_vec = base::unlist(theta_frame[re, , drop = FALSE])
-          loss_vec = base::unlist(loss_frame[re, , drop = FALSE])
-          best_result = base::data.frame(base::matrix(
-            NA, nrow = 1, ncol = 2,
-            dimnames = base::list(re, c("theta_p", "loss"))
-          ))
-
-          loss_topn = base::sort(loss_vec)[base::seq_len(topn)]
-          pattern = base::names(loss_topn)
-          theta_topn = theta_vec[pattern]
-
-          # Triangular weights from loss; equal weights when all losses tie.
-          loss_range = base::diff(base::range(loss_topn))
-          if (loss_range == 0) {
-            w = base::rep(1, topn)
-          } else {
-            w = (base::max(loss_topn) - loss_topn) / loss_range
-          }
-          # Down-weight boundary strengths.
-          boundary = theta_topn < 0.0101 | theta_topn > 0.9899
-          w_fix = w
-          w_fix[boundary] = w_fix[boundary] * fix_factor
-
-          best_result[re, "theta_p"] = stats::weighted.mean(theta_topn, w_fix)
-          best_result[re, "loss"] = stats::weighted.mean(loss_topn, w_fix)
-          pGRN_info[[re]] = base::list(best_result = best_result)
+        # Validate worker results (no failure, one integer row per input row).
+        if (base::length(order_list) != base::length(row_chunks) ||
+            base::any(vapply(order_list, function(x) !base::is.matrix(x), logical(1)))) {
+          base::stop("Parallel ordering failed: a worker did not return a matrix.")
         }
-
-        # Merge pair results into a chunk-level frame.
-        pair_results = pGRN_info[3:base::length(pGRN_info)]
-        pGRN_info[["best_result"]] = base::as.data.frame(data.table::rbindlist(base::lapply(
-          pair_results, function(x) x[["best_result"]]
-        )))
-        base::rownames(pGRN_info[["best_result"]]) = base::names(pair_results)
-        # Remove boundary-invalid strengths and infinite losses.
-        pGRN_info[["best_result"]] = pGRN_info[["best_result"]][
-          pGRN_info[["best_result"]]$theta_p >= 0.011 &
-            !base::is.infinite(pGRN_info[["best_result"]]$loss), , drop = FALSE]
-        return(pGRN_info[["best_result"]])
+        order_idx = base::do.call(base::rbind, order_list)
+        if (base::nrow(order_idx) != N || base::ncol(order_idx) != topn) {
+          base::stop("Parallel ordering failed: row count mismatch.")
+        }
+      } else {
+        order_idx = topn_order(loss_mat)
       }
+      ri = base::rep(base::seq_len(N), topn)
+      ci = base::as.vector(order_idx)
+      loss_top = base::matrix(loss_mat[cbind(ri, ci)], N, topn)
+      theta_top = base::matrix(theta_p_mat[cbind(ri, ci)], N, topn)
 
-      prediction_list = parallel::mclapply(
-        X = base::seq_len(n_part),
-        FUN = function(s) {
-          process_data_slice(pGRN_list[[s]], topn = topn, fix_factor = fix_factor)
-        },
-        mc.cores = ncores
+      # Triangular weights from loss; equal weights when all selected losses tie.
+      lmin = loss_top[, 1]
+      lmax = loss_top[, topn]
+      rng = lmax - lmin
+      w = base::matrix(1, N, topn)
+      tied = rng <= 0
+      if (base::any(!tied)) {
+        w[!tied, ] = (lmax[!tied] - loss_top[!tied, ]) / rng[!tied]
+      }
+      # Down-weight boundary strengths.
+      boundary = theta_top < 0.0101 | theta_top > 0.9899
+      w[boundary] = w[boundary] * fix_factor
+      w_sum = base::rowSums(w)
+      # Guard against a zero total weight (cannot happen with fix_factor > 0).
+      w_sum = base::pmax(w_sum, .Machine$double.eps)
+      theta_best = base::rowSums(theta_top * w) / w_sum
+      loss_best = base::rowSums(loss_top * w) / w_sum
+
+      # Remove boundary-invalid strengths and infinite losses.
+      keep = theta_best >= 0.011 & base::is.finite(loss_best)
+      branch_best = base::data.frame(
+        theta_p = theta_best[keep], loss = loss_best[keep],
+        row.names = base::rownames(theta_p_mat)[keep]
       )
-      base::gc()
-
-      # Bind chunks and suffix the columns with the branch index.
-      message("Summarizing best_result of this branch.")
-      branch_best = base::do.call(base::rbind, prediction_list)
-      base::colnames(branch_best) = base::paste0(base::colnames(branch_best), "_branch", n)
-      interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]][["best_result"]] =
+      base::colnames(branch_best) = base::paste0(base::colnames(branch_best),
+                                                 "_branch", n)
+      interest_cell_type_pGRN[[cell_type]][[paste0("branch", n)]][["best_result"]] =
         branch_best
+      branch_best_list[[n]] = branch_best
+      base::rm(order_idx, loss_top, theta_top, w)
+      base::gc(verbose = FALSE)
     }
 
-    # Build the integrated cell-type summary.
+    ### Build the integrated cell-type summary.
     message("Integrating branch results.")
-    branch_blocks = interest_cell_type_pGRN[[cell_type]][base::paste0("branch", branch_index)]
-    rows = base::sort(base::unique(base::Reduce(base::c, base::lapply(
-      branch_blocks, function(x) base::rownames(x[["best_result"]])
+    all_rows = base::sort(base::unique(base::unlist(base::lapply(
+      branch_best_list, base::rownames
     ))))
-    branch_cols = base::Reduce(base::c, base::lapply(
-      branch_blocks, function(x) base::colnames(x[["best_result"]])
-    ))
+    Ns = base::length(all_rows)
+    theta_cols = base::paste0("theta_p_branch", branch_index)
+    loss_cols = base::paste0("loss_branch", branch_index)
     cols = base::c(
-      "TF", "TG", branch_cols,
+      "TF", "TG", theta_cols, loss_cols,
       "FG.theta_p", "FG.Loss",
       "FG.theta_p_norm", "FG.theta_p_norm.R", "FG.Loss_norm", "FG.Loss_norm.R",
       "FG.theta_i", "FG.theta_i.R",
@@ -301,157 +261,138 @@ select_best_prediction = function(
       "G.NZER", "G.NZER.R", "G.NZEA", "G.NZEA.R", "G.EA", "G.EA.R"
     )
     pred_summary = base::data.frame(base::matrix(
-      NA, nrow = base::length(rows), ncol = base::length(cols),
-      dimnames = base::list(rows, cols)
+      NA_real_, nrow = Ns, ncol = base::length(cols),
+      dimnames = base::list(all_rows, cols)
     ))
-    pred_summary[, c("TF", "TG")] = base::do.call(
-      base::rbind, base::strsplit(base::rownames(pred_summary), "_to_")
-    )
-    for (n in branch_index) {
-      branch_best = branch_blocks[[n]][["best_result"]]
-      pred_summary[base::rownames(branch_best), base::colnames(branch_best)] = branch_best
+    pair_split = base::strsplit(all_rows, "_to_")
+    pred_summary$TF = base::vapply(pair_split, `[`, "", 1L)
+    pred_summary$TG = base::vapply(pair_split, `[`, "", 2L)
+    # Fill branch columns via named-vector matching (fast, vectorized).
+    for (b in branch_index) {
+      bb = branch_best_list[[b]]
+      th = stats::setNames(bb[[1]], base::rownames(bb))
+      ls = stats::setNames(bb[[2]], base::rownames(bb))
+      pred_summary[[theta_cols[b]]] = th[all_rows]
+      pred_summary[[loss_cols[b]]] = ls[all_rows]
     }
 
     # Integrate strength and loss by branch cell counts.
-    n_branch = base::length(branch_index)
-    weights = base::unlist(interest_cell_type_genes_pseudotime_info[[cell_type]][["Branches_n_cell"]])
-    if (n_branch > 1) {
-      pred_summary$FG.theta_p = base::apply(
-        pred_summary[, base::grep("^theta_p_branch([0-9]{1,2})$", base::names(pred_summary),
-                                  value = TRUE)],
-        1, function(x) {
-          valid = base::which(!base::is.na(x))
-          if (base::length(valid) == 0) 0
-          else base::sum(x[valid] * weights[valid]) / base::sum(weights[valid])
-        }
-      )
-      pred_summary$FG.Loss = base::apply(
-        pred_summary[, base::grep("^loss_branch([0-9]{1,2})$", base::names(pred_summary),
-                                  value = TRUE)],
-        1, function(x) {
-          valid = base::which(!base::is.na(x))
-          if (base::length(valid) == 0) Inf
-          else base::sum(x[valid] * weights[valid]) / base::sum(weights[valid])
-        }
-      )
-    } else if (n_branch == 1) {
-      pred_summary$FG.theta_p = pred_summary$theta_p_branch1
-      pred_summary$FG.Loss = pred_summary$loss_branch1
-    } else {
-      base::stop("The number of branches is less than 1.")
+    theta_B = base::as.matrix(pred_summary[, theta_cols, drop = FALSE])
+    loss_B = base::as.matrix(pred_summary[, loss_cols, drop = FALSE])
+    W = base::matrix(cell_weights, nrow = Ns, ncol = n_branch, byrow = TRUE)
+    mask_t = !base::is.na(theta_B); theta_B[!mask_t] = 0
+    mask_l = !base::is.na(loss_B); loss_B[!mask_l] = 0
+    den_t = base::rowSums(W * mask_t)
+    den_l = base::rowSums(W * mask_l)
+    pred_summary$FG.theta_p = base::ifelse(
+      den_t > 0, base::rowSums(theta_B * W * mask_t) / base::pmax(den_t, .Machine$double.eps), 0
+    )
+    pred_summary$FG.Loss = base::ifelse(
+      den_l > 0, base::rowSums(loss_B * W * mask_l) / base::pmax(den_l, .Machine$double.eps), Inf
+    )
+
+    ### Within-TF normalization helper (build TG x TF matrix, scale per column).
+    normalize_within_TF = function(value, tau_shift) {
+      tg = pred_summary$TG; tf = pred_summary$TF
+      all_tg = base::sort(base::unique(tg))
+      all_tf = base::sort(base::unique(tf))
+      Mx = base::matrix(0, nrow = base::length(all_tg), ncol = base::length(all_tf),
+                        dimnames = base::list(all_tg, all_tf))
+      Mx[cbind(base::match(tg, all_tg), base::match(tf, all_tf))] = value
+      Mx_pos = Mx; Mx_pos[Mx_pos <= 0] = Inf
+      col_min = base::apply(Mx_pos, 2, base::min)
+      col_max = base::apply(Mx, 2, base::max)
+      active = col_max > 0
+      out = base::matrix(0, base::nrow(Mx), base::ncol(Mx),
+                         dimnames = base::dimnames(Mx))
+      if (base::any(active)) {
+        min_before = col_min[active] * min_scale
+        max_before = col_max[active] + 0.0001
+        denom = max_before - min_before
+        scaled = (Mx[, active, drop = FALSE] - base::matrix(
+          min_before, nrow = base::nrow(Mx), ncol = base::sum(active), byrow = TRUE
+        )) / base::matrix(denom, nrow = base::nrow(Mx), ncol = base::sum(active),
+                          byrow = TRUE)
+        if (tau_shift) scaled = tau + (1 - tau) * scaled
+        out[, active] = scaled
+      }
+      out[Mx <= 0] = 0
+      out[out < 0] = 0
+      # Map back to the pred_summary rows.
+      out[cbind(base::match(tg, base::rownames(out)),
+                base::match(tf, base::colnames(out)))]
     }
 
-    # Within-TF min-max normalization of predicted strengths, tau-shifted.
+    # Strengths: tau-shifted.
     message("Normalizing predicted strengths within each TF.")
-    pGRN = base::as.data.frame.matrix(stats::xtabs(FG.theta_p ~ TG + TF, data = pred_summary))
-    pGRN_norm = pGRN
-    for (tf in base::colnames(pGRN_norm)) {
-      tf_tgs = pGRN_norm[, tf, drop = FALSE]
-      base::colnames(tf_tgs)[1] = "theta_p"
-      if (base::max(tf_tgs$theta_p) == 0) {
-        tf_tgs$theta_p_norm = 0
-      } else {
-        max_before = base::max(tf_tgs$theta_p) + 0.0001
-        min_before = base::min(tf_tgs$theta_p[tf_tgs$theta_p > 0]) * min_scale
-        tf_tgs$theta_p_norm = tau + (1 - tau) *
-          (tf_tgs$theta_p - min_before) / (max_before - min_before)
-        tf_tgs$theta_p_norm[tf_tgs$theta_p_norm < 0] = 0
-      }
-      pGRN_norm[, tf] = tf_tgs[base::rownames(pGRN_norm), "theta_p_norm"]
-    }
-    pred_summary$FG.theta_p_norm = base::mapply(
-      function(tf, tg) pGRN_norm[tg, tf],
-      pred_summary$TF, pred_summary$TG, USE.NAMES = FALSE
+    pred_summary$FG.theta_p_norm = normalize_within_TF(
+      pred_summary$FG.theta_p, tau_shift = TRUE
     )
-    positive_theta_p = base::sort(pred_summary$FG.theta_p_norm)
-    positive_theta_p = positive_theta_p[positive_theta_p > 0]
-    if (base::length(positive_theta_p) > 0) {
-      rank_df = base::unique(base::data.frame(
-        value = positive_theta_p,
-        norm_rank = base::rank(positive_theta_p, ties.method = "min") /
-          base::length(positive_theta_p)))
-      pred_summary$FG.theta_p_norm.R =
-        rank_df$norm_rank[base::match(pred_summary$FG.theta_p_norm, rank_df$value)]
-    } else {
-      pred_summary$FG.theta_p_norm.R = base::rep(NA_real_, base::nrow(pred_summary))
-    }
-    pred_summary$FG.theta_p_norm.R[pred_summary$FG.theta_p_norm <= 0] = 0
-
-    # Within-TF min-max normalization of losses, without the tau shift.
+    # Losses: no shift.
     message("Normalizing losses within each TF.")
-    pLoss = base::as.data.frame.matrix(stats::xtabs(FG.Loss ~ TG + TF, data = pred_summary))
-    pLoss_norm = pLoss
-    for (tf in base::colnames(pLoss_norm)) {
-      tf_tgs = pLoss_norm[, tf, drop = FALSE]
-      base::colnames(tf_tgs)[1] = "Loss"
-      if (base::max(tf_tgs$Loss) == 0) {
-        tf_tgs$Loss_norm = 0
-      } else {
-        max_before = base::max(tf_tgs$Loss) + 0.0001
-        min_before = base::min(tf_tgs$Loss[tf_tgs$Loss > 0]) * min_scale
-        tf_tgs$Loss_norm = (tf_tgs$Loss - min_before) / (max_before - min_before)
-        tf_tgs$Loss_norm[tf_tgs$Loss_norm < 0] = 0
+    pred_summary$FG.Loss_norm = normalize_within_TF(
+      pred_summary$FG.Loss, tau_shift = FALSE
+    )
+
+    ### Global normalized ranks (ties "min") over the positive values.
+    rank_over_positive = function(v, zero_rank = NA_real_) {
+      out = base::rep(NA_real_, base::length(v))
+      pos = !base::is.na(v) & v > 0
+      if (base::any(pos)) {
+        r = base::rank(v[pos], ties.method = "min") / base::sum(pos)
+        out[pos] = r
       }
-      pLoss_norm[, tf] = tf_tgs[base::rownames(pLoss_norm), "Loss_norm"]
+      if (base::length(zero_rank) == 1 && !base::is.na(zero_rank)) {
+        non_pos = !pos
+        out[non_pos] = zero_rank
+      }
+      out
     }
-    pred_summary$FG.Loss_norm = base::mapply(
-      function(tf, tg) pLoss_norm[tg, tf],
-      pred_summary$TF, pred_summary$TG, USE.NAMES = FALSE
+    pred_summary$FG.theta_p_norm.R = rank_over_positive(
+      pred_summary$FG.theta_p_norm, zero_rank = 0
     )
-    positive_loss = base::sort(pred_summary$FG.Loss_norm)
-    positive_loss = positive_loss[positive_loss > 0]
-    if (base::length(positive_loss) > 0) {
-      rank_df = base::unique(base::data.frame(
-        value = positive_loss,
-        norm_rank = base::rank(positive_loss, ties.method = "min") /
-          base::length(positive_loss)
-      ))
-      pred_summary$FG.Loss_norm.R =
-        rank_df$norm_rank[base::match(pred_summary$FG.Loss_norm, rank_df$value)]
-    } else {
-      pred_summary$FG.Loss_norm.R = base::rep(NA_real_, base::nrow(pred_summary))
-    }
+    pred_summary$FG.Loss_norm.R = rank_over_positive(
+      pred_summary$FG.Loss_norm, zero_rank = NA_real_
+    )
 
-    # Observed theta_i from the iGRN matrix.
+    ### Observed theta_i from the iGRN matrix.
     message("Attaching observed theta_i and its rank.")
-    iGRN = interest_cell_type_iGRN[[cell_type]]
-    pred_summary$FG.theta_i = base::mapply(
-      function(tf, tg) iGRN[tg, tf],
-      pred_summary$TF, pred_summary$TG, USE.NAMES = FALSE
+    iGRN = base::as.matrix(interest_cell_type_iGRN[[cell_type]])
+    pred_summary$FG.theta_i = base::as.numeric(
+      iGRN[cbind(base::match(pred_summary$TG, base::rownames(iGRN)),
+                 base::match(pred_summary$TF, base::colnames(iGRN)))]
     )
-    positive_theta_i = base::sort(base::unlist(iGRN))
-    positive_theta_i = positive_theta_i[positive_theta_i > 0]
-    if (base::length(positive_theta_i) > 0) {
-      rank_df = base::unique(base::data.frame(
-        value = positive_theta_i,
-        norm_rank = base::rank(positive_theta_i, ties.method = "min") /
-          base::length(positive_theta_i)))
-      pred_summary$FG.theta_i.R =
-        rank_df$norm_rank[base::match(pred_summary$FG.theta_i, rank_df$value)]
-    } else {
-      pred_summary$FG.theta_i.R = base::rep(NA_real_, base::nrow(pred_summary))
+    # theta_i rank across the whole iGRN positive values, 0 for theta_i == 0.
+    pos_i = base::which(base::as.numeric(iGRN) > 0)
+    theta_i_rank = base::rep(NA_real_, base::length(pred_summary$FG.theta_i))
+    if (base::length(pos_i) > 0) {
+      r = base::rank(iGRN[pos_i], ties.method = "min") / base::length(pos_i)
+      # Build a value -> rank lookup (unique values).
+      vals = iGRN[pos_i]
+      lookup = base::data.frame(v = vals, r = r)
+      lookup = lookup[!base::duplicated(lookup$v), ]
+      theta_i_rank = lookup$r[base::match(pred_summary$FG.theta_i, lookup$v)]
     }
-    # Pairs with theta_i = 0 keep rank 0.
-    pred_summary$FG.theta_i.R[pred_summary$FG.theta_i == 0] = 0
+    theta_i_rank[pred_summary$FG.theta_i == 0] = 0
+    pred_summary$FG.theta_i.R = theta_i_rank
 
-    # Attach the precomputed TF and TG gene features.
+    ### Attach the precomputed TF and TG gene features.
     message("Attaching gene-level expression features.")
-    attach_feature = function(gene_col, feature, rank = FALSE) {
-      col_name = base::ifelse(rank, base::paste0(feature, "-norm_rank"), feature)
-      gene_features[pred_summary[[gene_col]], col_name]
+    attach_features = function(gene_col, feature) {
+      gf_named[[feature]][pred_summary[[gene_col]]]
     }
-    pred_summary$F.NZER = attach_feature("TF", "nonzero_freq")
-    pred_summary$F.NZER.R = attach_feature("TF", "nonzero_freq", rank = TRUE)
-    pred_summary$G.NZER = attach_feature("TG", "nonzero_freq")
-    pred_summary$G.NZER.R = attach_feature("TG", "nonzero_freq", rank = TRUE)
-    pred_summary$F.NZEA = attach_feature("TF", "nonzero_mean")
-    pred_summary$F.NZEA.R = attach_feature("TF", "nonzero_mean", rank = TRUE)
-    pred_summary$G.NZEA = attach_feature("TG", "nonzero_mean")
-    pred_summary$G.NZEA.R = attach_feature("TG", "nonzero_mean", rank = TRUE)
-    pred_summary$F.EA = attach_feature("TF", "overall_mean")
-    pred_summary$F.EA.R = attach_feature("TF", "overall_mean", rank = TRUE)
-    pred_summary$G.EA = attach_feature("TG", "overall_mean")
-    pred_summary$G.EA.R = attach_feature("TG", "overall_mean", rank = TRUE)
+    pred_summary$F.NZER = attach_features("TF", "nonzero_freq")
+    pred_summary$F.NZER.R = attach_features("TF", "nonzero_freq-norm_rank")
+    pred_summary$G.NZER = attach_features("TG", "nonzero_freq")
+    pred_summary$G.NZER.R = attach_features("TG", "nonzero_freq-norm_rank")
+    pred_summary$F.NZEA = attach_features("TF", "nonzero_mean")
+    pred_summary$F.NZEA.R = attach_features("TF", "nonzero_mean-norm_rank")
+    pred_summary$G.NZEA = attach_features("TG", "nonzero_mean")
+    pred_summary$G.NZEA.R = attach_features("TG", "nonzero_mean-norm_rank")
+    pred_summary$F.EA = attach_features("TF", "overall_mean")
+    pred_summary$F.EA.R = attach_features("TF", "overall_mean-norm_rank")
+    pred_summary$G.EA = attach_features("TG", "overall_mean")
+    pred_summary$G.EA.R = attach_features("TG", "overall_mean-norm_rank")
 
     interest_cell_type_pGRN[[cell_type]][["pred_summary"]] = pred_summary
   }

@@ -27,23 +27,21 @@ select_best_prediction(
 weighted integration.}
 
 \item{interest_cell_type_iGRN}{List. Output of \code{\link{calculate_iGRN}} or
-\code{\link{filter_iGRN_by_ChIP_Atlas_priors}}. Cell-type-specific iGRN matrices, used
-to retrieve the observed regulatory strength \code{theta_i}.}
+\code{\link{filter_iGRN_by_ChIP_Atlas_priors}}, used to retrieve the
+observed regulatory strength \code{theta_i}.}
 
-\item{Basic_Info}{List returned by \code{\link{get_expression_matrix}}. Basic information containing the Seurat object
-\code{scRNAseq_for_GRN} from which gene-level expression features are
-computed.}
+\item{Basic_Info}{List returned by \code{\link{get_expression_matrix}},
+containing the Seurat object \code{scRNAseq_for_GRN} from which gene-level
+expression features are computed.}
 
-\item{interest_cell_type_tau}{Named numeric vector. Output of \code{\link{get_cell_type_tau}}. Cell-type-specific
-binarization thresholds, used to shift normalized positive strengths above
-\code{tau}.}
+\item{interest_cell_type_tau}{Named numeric vector. Output of
+\code{\link{get_cell_type_tau}}, used to shift normalized positive
+strengths above \code{tau}.}
 
-\item{topn_max}{Positive integer. Maximum number of models averaged per
-pair.
+\item{topn_max}{Positive integer. Maximum number of models averaged per pair.
 Defaults to 25.}
 
-\item{topn_min}{Positive integer. Minimum number of models averaged per
-pair.
+\item{topn_min}{Positive integer. Minimum number of models averaged per pair.
 Defaults to 5.}
 
 \item{topn_ratio}{Numeric between 0 and 1. Number of models averaged as a
@@ -51,16 +49,12 @@ proportion of available trained models.
 Defaults to 0.1.}
 
 \item{fix_factor}{Numeric in (0, 1]. Factor applied to the weights of
-boundary strengths, with 1 applying no down-weighting; must be strictly
-greater than 0.
+boundary strengths, with 1 applying no down-weighting.
 Defaults to 1.0.}
 
-\item{min_scale}{Numeric in (0, 1]. Multiplier on the smallest positive
-value when setting the min-max lower bound, applied to strength and loss
+\item{min_scale}{Numeric in (0, 1]. Multiplier on the smallest positive value
+when setting the min-max lower bound, applied to strength and loss
 normalization.
-For strengths, \code{min_scale = 1} maps the weakest positive edge of a TF
-to \code{tau}, the strongest to just below 1, while absent pairs reset to 0;
-values below 1 keep the weakest edge slightly above \code{tau}.
 Defaults to 0.99.}
 
 \item{each}{Positive integer. Maximum number of pairs per parallel chunk.
@@ -72,23 +66,6 @@ Defaults to 1; set to 1 on Windows.}
 }
 \value{
 The input list with a \code{pred_summary} frame per cell type.
-Its columns are:
-\itemize{
-\item \code{TF}, \code{TG}: the pair identifiers.
-\item \code{theta_p_branchN}, \code{loss_branchN}: branch-level averaged
-strength and loss.
-\item \code{FG.theta_p}, \code{FG.Loss}: cell-count weighted strength and
-loss across branches.
-\item \code{FG.theta_p_norm}, \code{FG.theta_p_norm.R}: within-TF
-normalized strength and its rank.
-\item \code{FG.Loss_norm}, \code{FG.Loss_norm.R}: within-TF normalized
-loss and its rank.
-\item \code{FG.theta_i}, \code{FG.theta_i.R}: observed strength and its
-normalized rank, with rank 0 for \code{theta_i = 0}.
-\item \code{F.*} and \code{G.*}: TF and TG expression features and their
-normalized ranks, including non-zero ratio, non-zero average and overall
-average.
-}
 }
 \description{
 Post-processes inferred GRN results.
@@ -102,40 +79,18 @@ observed regulatory-strength ranks together with gene expression features
 are attached.
 }
 \details{
-For each cell type, the function proceeds as follows:
-\enumerate{
-\item Computes shared gene expression features once from the normalized
-scRNA-seq data.
-\item Splits the pairs of each branch into chunks.
-\item For each pair, selects \code{topn} lowest-loss models, where
-\code{topn} is clamped to
-\code{round(n_train * topn_ratio)} within \code{topn_min} and
-\code{topn_max}.
-\item Assigns triangular weights from loss, from 1 for the smallest loss to
-0 for the largest, or equal weights when all selected losses tie;
-weights of boundary strengths below 0.0101 or above 0.9899 are
-multiplied by \code{fix_factor}.
-\item Takes the weighted mean of the selected strengths and losses.
-\item Merges chunks, suffixes columns by branch, and removes pairs with
-strength below 0.011 or infinite loss.
-\item Integrates branches by cell-count weights.
-\item Normalizes strengths and losses within each TF: the lower bound is
-the smallest positive value times \code{min_scale}, the upper bound is
-the largest value plus 0.0001; positive strengths are shifted above
-\code{tau}, while absent pairs reset to 0, and losses are scaled without
-the shift.
-\item Computes normalized ranks, fills the observed \code{theta_i} and its
-rank, and attaches the gene features.
-}
+The per-pair "select top-n lowest-loss models and loss-weight them"
+operation is a pure row-wise reduction: the column permutation that orders
+the loss matrix is computed with \code{\link{apply}} (C-level ordering),
+the selected strengths and losses are gathered by linear indexing, and the
+triangular weights and weighted means are computed by matrix algebra. No
+per-pair R loop, per-pair list append, or duplicated chunk frames are built.
 }
 \note{
 \itemize{
 \item The function creates and switches to the \code{5 Infer GRN}
 directory, and restores the original working directory on exit.
-\item \code{fix_factor} must be in (0, 1]; set it below 1 to discount
-boundary predictions.
-\item Boundary strengths near 0.01 or 0.99 reflect the optimization bounds
-and are treated as less reliable.
+\item \code{fix_factor} must be in (0, 1].
 \item Reduce \code{each} if out-of-memory errors occur.
 \item Parallel processing relies on \code{\link[parallel]{mclapply}};
 set \code{ncores = 1} on Windows.
