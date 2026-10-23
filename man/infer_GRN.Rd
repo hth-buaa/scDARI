@@ -35,7 +35,7 @@ containing pseudotime interval lengths for each branch.}
 NULL processes all.
 Defaults to NULL.}
 
-\item{select_branch}{Numeric vector or NULL. Branch indices to process;
+\item{select_branch}{Numeric vector or NULL. Branch indices to process.
 NULL processes all.
 Defaults to NULL.}
 
@@ -67,16 +67,15 @@ parallel computation is supported, and branch-level results are saved
 automatically.
 }
 \details{
-For each selected branch, inference proceeds as follows:
-\enumerate{
-\item Splits candidate pairs into chunks of at most \code{each} pairs.
-\item Processes chunks in parallel: for each pair, every trained model is
-applied and Brent optimization finds the strength within 0.01-0.99 that
-minimizes prediction loss.
-\item Binds chunk results into the branch-level \code{theta_p} and
-\code{loss} frames.
-\item Saves the branch result as an RDS file.
-}
+For a fixed pair and model, the prediction loss is a quadratic
+in the effect efficiency \eqn{R}:
+\deqn{\mathrm{MSE}(R) = A R^2 + B R + C,}
+built from the consecutive-group residuals. Its unconstrained minimum is
+\eqn{R^* = -B/(2A)}. Because \eqn{R(\theta)} is a monotonic gating function
+whose shape depends only on \eqn{\tau} and the model's \eqn{r_2}, a single
+monotonic inverse (shared by every pair) maps \eqn{R^*} back to the optimal
+strength \eqn{\theta}. All coefficients are computed with matrix algebra
+over the pairs, so the per-pair Brent optimization is eliminated.
 }
 \note{
 \itemize{
