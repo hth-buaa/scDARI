@@ -12,7 +12,8 @@ infer_GRN(
   select_cell_type = NULL,
   select_branch = NULL,
   each = 1e+06,
-  ncores = 1
+  ncores = 1,
+  save_check_point = TRUE
 )
 }
 \arguments{
@@ -46,6 +47,9 @@ Defaults to 1000000.}
 \item{ncores}{Positive integer. Number of cores for parallel processing via
 \code{\link[parallel]{mclapply}}.
 Defaults to 1; set to 1 on Windows.}
+
+\item{save_check_point}{logical. Defaults to \code{TRUE} for saving the
+check point after inferring per branch.}
 }
 \value{
 Nested list named \code{interest_cell_type_pGRN}, organized by cell
@@ -113,7 +117,8 @@ interest_cell_type_pGRN = infer_GRN(
   select_cell_type = NULL,
   select_branch = NULL,
   each = each,
-  ncores = ncores
+  ncores = ncores,
+  save_check_point = TRUE
 )
 base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 
@@ -130,7 +135,8 @@ for (cell_type in base::names(interest_cell_type_branch_data_for_GRN_infer)) {
       select_cell_type = cell_type,
       select_branch = n,
       each = each,
-      ncores = ncores
+      ncores = ncores,
+      save_check_point = TRUE
     )[[cell_type]][[base::paste0("branch", n)]]
   }
 }

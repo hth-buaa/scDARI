@@ -26,4 +26,5 @@ Imports:
     parmigene,
     data.table,
     dplyr,
-    GA
+    GA,
+    qs

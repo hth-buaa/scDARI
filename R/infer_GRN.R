@@ -29,6 +29,8 @@
 #' @param ncores Positive integer. Number of cores for parallel processing via
 #'   \code{\link[parallel]{mclapply}}.
 #' Defaults to 1; set to 1 on Windows.
+#' @param save_check_point logical. Defaults to \code{TRUE} for saving the
+#'   check point after inferring per branch.
 #'
 #' @return Nested list named \code{interest_cell_type_pGRN}, organized by cell
 #' type and branch, each branch containing two data frames:
@@ -89,7 +91,8 @@
 #'   select_cell_type = NULL,
 #'   select_branch = NULL,
 #'   each = each,
-#'   ncores = ncores
+#'   ncores = ncores,
+#'   save_check_point = TRUE
 #' )
 #' base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 #'
@@ -106,7 +109,8 @@
 #'       select_cell_type = cell_type,
 #'       select_branch = n,
 #'       each = each,
-#'       ncores = ncores
+#'       ncores = ncores,
+#'       save_check_point = TRUE
 #'     )[[cell_type]][[base::paste0("branch", n)]]
 #'   }
 #' }
@@ -120,7 +124,8 @@ infer_GRN = function(
     select_cell_type = NULL,
     select_branch = NULL,
     each = 1000000,
-    ncores = 1
+    ncores = 1,
+    save_check_point = TRUE
 ) {
   ### Start.
   t_start = base::Sys.time()
@@ -406,12 +411,14 @@ infer_GRN = function(
       interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]] = branch_result
 
       # Save the branch result.
-      message("Saving the predictive results of this branch.")
-      base::saveRDS(
-        branch_result,
-        file = base::paste0("./interest_cell_type_pGRN.",
-                            base::gsub(" ", "_", cell_type), ".branch", n, ".rds")
-      )
+      if (save_check_point) {
+        message("Saving the predictive results of this branch.")
+        qs::qsave(
+          branch_result,
+          file = base::paste0("./interest_cell_type_pGRN.",
+                              base::gsub(" ", "_", cell_type), ".branch", n, ".qsave")
+        )
+      }
     }
   }
 
