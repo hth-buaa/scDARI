@@ -19,54 +19,73 @@ with target genes as rows and TFs as columns.}
 \item{interest_cell_type_group}{List. Output of \code{\link{cell_grouping}},
 containing the aggregated TFE/TGE features for each branch.}
 
-\item{n_part}{Positive integer. Number of partitions for parallel feature
-binding.
+\item{n_part}{Positive integer. Number of within-branch partitions; used
+only for a single branch (with multiple branches the branch itself is the
+parallel unit).
 Defaults to 1.}
 
 \item{ncores}{Positive integer. Number of cores for parallel processing via
 \code{\link[parallel]{mclapply}}.
-Defaults to 1; set to 1 on Windows.}
+Defaults to 1; on Windows it is forced to 1 (no forking).}
 }
 \value{
 Nested list organized by cell type, each entry containing:
 \itemize{
 \item \code{branch1}, \code{branch2}, ...: branch data frames with one row
-per TF-TG pair, including \code{TG}, \code{TF}, \code{theta_i} and the
-group features \code{TFE_K} and \code{TGE_K} for each group K.
+per non-zero TF-TG pair, including \code{TG}, \code{TF}, \code{theta_i}
+and the group features \code{TFE_K} and \code{TGE_K} for each group K.
 \item \code{GRN}: global de-duplicated pair set across branches, containing
 only \code{TG}, \code{TF} and \code{theta_i}.
 }
-Pairs with \code{theta_i = 0} are removed from both branch and global sets.
+Pairs with \code{theta_i = 0} (or \code{NA}) are removed from both branch
+and global sets.
 }
 \description{
 Builds inference-ready datasets by combining branch-level iGRN
 TF-TG pairs with group expression features from cell grouping.
-Partition-based parallel processing is supported, and both branch-level full
+Non-zero pairs are located directly from the (often sparse) branch iGRN
+matrices via vectorized indexing, and the TFE/TGE feature binding is fully
+vectorized (C-level matrix operations), eliminating the original row-by-row
+R loops. When several branches are present the independent branches are
+processed in parallel by forking; a single branch uses an optional
+within-branch partition controlled by \code{n_part}. Both branch-level full
 feature sets and a global de-duplicated pair set are returned.
 }
 \details{
 For each cell type, the function proceeds as follows:
 \enumerate{
-\item Generates every TG-TF combination from each branch iGRN matrix and
-extracts the regulatory strength \code{theta_i}.
-\item Binds the branch pairs and removes duplicates to form the global set.
-\item Splits each branch pair set into \code{n_part} partitions, and appends
-the TFE/TGE group features, in parallel when requested.
-\item Recombines the partitions into the complete branch datasets.
-\item Removes pairs with \code{theta_i = 0} from branch and global sets.
+\item Locates non-zero entries of each branch iGRN matrix with
+\code{which(mat != 0)} and converts the linear indices to TG/TF
+positions, yielding the non-zero pairs (with values) in column-major
+order in one vectorized step.
+\item Appends the TFE/TGE group features by vectorized matrix indexing:
+each selected TF's / TG's group-expression row is looked up to match the
+pair order.
+\item With multiple branches, builds the branches in parallel; with a
+single branch, optionally splits it into \code{n_part} partitions.
+\item Binds the non-zero pairs across branches and de-duplicates by the
+pair (TG, TF) to form the global set.
 }
+The pairs are generated directly from the row/column names of the branch
+iGRN matrices, so every pair is guaranteed to belong to that branch's
+TF/TG sets; the per-row membership test and row-by-row assignment of the
+original implementation are therefore unnecessary and removed.
 }
 \note{
 \itemize{
 \item The function creates and switches to the \code{5 Infer GRN} directory,
-and restores the original working directory on exit.
-\item Partition-based parallelism speeds up feature binding for large pair
-sets; choose \code{n_part} according to dataset size and memory.
-\item Pairs with zero regulatory strength are excluded automatically.
+and restores the original working directory on exit (including on error).
+\item Feature binding is memory-allocation/indexing bound, not CPU bound.
+For a single branch the vectorized serial build is already near optimal
+and within-branch splitting may be slightly slower from fork/recombine
+overhead; for multiple branches the cross-branch parallelism uses the
+independent branches and can speed the work up on a multi-socket server.
+\item Pairs with zero (or \code{NA}) regulatory strength are excluded
+automatically.
 \item The \code{GRN} element gives a global, de-duplicated view without
 group features.
 \item Parallel processing relies on \code{\link[parallel]{mclapply}};
-set \code{ncores = 1} on Windows.
+on Windows \code{ncores} is forced to 1.
 }
 }
 \examples{
