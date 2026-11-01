@@ -1,43 +1,57 @@
-#' @title Optimize the Regulatory Strength for a Single TF-TG Pair
+#' @title Optimize the Regulatory Strength for One TF-TG Pair
 #'
-#' @description Fixes the trained dynamic parameters and treats the regulatory
-#' strength as the only variable, using Brent one-dimensional optimization to
-#' find the value that minimizes the expression prediction error.
+#' @description Holds the trained dynamic parameters fixed and treats the
+#' regulatory strength as the only decision variable, using one-dimensional
+#' Brent optimization to find the value that minimizes the expression
+#' prediction error. It is called after parameter training to turn a fitted
+#' dynamical model into a predicted, continuous regulatory strength.
 #'
-#' @param data Data frame. Data for one TF-TG pair, containing the prior
-#' regulatory strength \code{theta_i} and group expression columns prefixed with
-#' \code{TFE_} and \code{TGE_}.
-#' @param best_params Numeric vector. Trained model parameters.
-#' @param params_names Character vector. Names corresponding to the elements of
-#' \code{best_params}.
-#' @param tau Positive numeric. Regulatory binarization threshold.
-#' @param Tslot_K Positive numeric vector. Pseudotime interval lengths.
+#' @param data Data frame or one-row matrix. Data for one regulon, containing
+#' the prior strength \code{theta_i} and the group columns prefixed with
+#' \code{TFE_} and \code{TGE_}. Defaults to a \code{train_data} variable in
+#' the calling environment. Closely related to \code{Tslot_K}, which gives
+#' the interval lengths for the same groups.
+#' @param best_params Numeric vector of length 11. Trained model parameters;
+#' all dynamic parameters are read from it and held fixed. Closely related to
+#' \code{params_names}.
+#' @param params_names Character vector. Names corresponding to the elements
+#' of \code{best_params}, used to name the vector before each parameter is
+#' read.
+#' @param tau Numeric strictly between 0 and 1. Regulatory binarization
+#' threshold. It also defines the optimization starting point, which is
+#' clamped from \code{tau} to lie strictly inside the search interval.
+#' @param Tslot_K Positive numeric vector. Pseudotime interval lengths
+#' between consecutive groups; the lag-1 subset multiplies the residuals.
 #'
-#' @return Single numeric value. Optimal regulatory strength, bounded within
-#' \[0.01, 0.99\].
+#' @return A single numeric value, the optimal regulatory strength returned
+#' by the Brent search and always bounded within \[0.01, 0.99\].
 #'
-#' @details All dynamic parameters are held fixed and only the regulatory
-#' strength is optimized:
+#' @details Only the regulatory strength varies, and the calculation proceeds
+#' in three stages:
 #' \enumerate{
-#'   \item The theta-independent quantities, including the series, Hill
-#'     saturations, boundary factor and feedback strength, are computed once.
-#'   \item The objective is the equal-weight prediction loss used in
-#'     \code{\link{loss_cal}}, with the effect efficiency \eqn{R(\theta)} as the
-#'     only theta-dependent term.
-#'   \item Brent optimization via \code{\link[stats]{optim}} returns the
-#'     regulatory strength minimizing prediction error on \[0.01, 0.99\].
+#'   \item Computes once every theta-independent quantity: the two series,
+#'     Hill saturations \eqn{v_i}, \eqn{v_j}, clamped \eqn{v_j}, boundary
+#'     factor \eqn{rho}, feedback strength \eqn{S} and interval lengths.
+#'   \item Defines the objective as the equal-weight prediction loss used in
+#'     \code{\link{loss_cal}}; the effect efficiency \eqn{R(\theta)} from
+#'     \code{\link{R_cal}} is the only term that changes with \eqn{theta}.
+#'   \item Runs Brent optimization with \code{\link[stats]{optim}} on
+#'     \[0.01, 0.99\] and returns the minimizing strength.
 #' }
 #'
 #' @note
 #' \itemize{
-#'   \item Used to infer the regulatory strength after the dynamic parameters are trained.
-#'   \item The 0.01-0.99 bounds avoid extreme values that may cause numerical instability.
-#'   \item Non-feasible evaluations use the large positive fallback \eqn{10^{12}}.
-#'   \item Computes the effect efficiency \eqn{R} via \code{\link{R_cal}}.
-#'   \item Computes the Hill saturations \eqn{v_i}, \eqn{v_j} via \code{\link{Hill_cal}} and the net rate \eqn{v_i-v_j},
-#'     and clamps \eqn{v_j} away from the endpoints for \eqn{S}.
-#'   \item Computes the derivative of the unimodal feedback effect magnitude \eqn{S} via \code{\link{S_cal}}.
+#'   \item The 0.01-0.99 bounds avoid the extreme strengths at which the
+#'     Hill and gating functions can become numerically unstable.
+#'   \item The starting point is clamped to \eqn{0.01 + 10^{-6}, 0.99 - 10^{-6}}
+#'     so it is never placed exactly on an endpoint.
+#'   \item A non-feasible objective evaluation returns the large positive
+#'     fallback \eqn{10^{12}}.
 #' }
+#'
+#' @seealso Internally uses \code{\link{R_cal}}, \code{\link{Hill_cal}} and
+#'   \code{\link{S_cal}}. Called by \code{\link{model_train}}. Related loss
+#'   function: \code{\link{loss_cal}}.
 #'
 #' @export
 #'
@@ -80,18 +94,17 @@ theta_p_cal = function (
   TFE = base::as.numeric(data[, base::grep("TFE_", base::colnames(data), value = TRUE)])
   TGE = base::as.numeric(data[, base::grep("TGE_", base::colnames(data), value = TRUE)])
   Length = base::length(TFE)
+  K_1 = base::seq_len(Length - 1L)
 
-  vi = scDARI::Hill_cal(x = TFE[-Length], Dissociation_Constant = u1i, Hill_Coefficient = u2i)
-  vj = scDARI::Hill_cal(x = TGE[-Length], Dissociation_Constant = u1j, Hill_Coefficient = u2j)
+  vi = scDARI::Hill_cal(x = TFE[K_1], Dissociation_Constant = u1i, Hill_Coefficient = u2i)
+  vj = scDARI::Hill_cal(x = TGE[K_1], Dissociation_Constant = u1j, Hill_Coefficient = u2j)
   vij = vi - vj
-  # Clamp saturation away from the endpoints for S, where 1/v or 1/(1-v) diverges.
   vj_safe = base::pmin(base::pmax(vj, 1e-12), 1 - 1e-12)
 
   # Theta-independent boundary factor and feedback strength.
-  rho_vec = TFE[-Length] / (TFE[-Length] + 0.01)
-  S_vec = base::sapply(vj_safe, function(v) {
-    scDARI::S_cal(s = s, v = v, v_tilde = v_tilde)
-  })
+  rho_vec = TFE[K_1] / (TFE[K_1] + 0.01)
+  S_vec = scDARI::S_cal(s = s, v = vj_safe, v_tilde = v_tilde)
+  Tslot = Tslot_K[K_1]
 
   # Keep the starting point strictly inside the optimization interval.
   par0 = base::min(base::max(tau, 0.01 + 1e-6), 0.99 - 1e-6)
@@ -103,13 +116,11 @@ theta_p_cal = function (
     )
     if (!base::is.finite(R)) return(bad_loss)
 
-    MSE = base::mean(base::sapply(2:Length, function(K) {
-      K_1 = K - 1
-      Tslot_K_K_1 = Tslot_K[K_1]
-      error_f1 = TGE[K_1] + R * a1 * vij[K_1] * Tslot_K_K_1 + b1 - TGE[K]
-      error_f2 = TFE[K_1] + rho_vec[K_1] * R * a2 * S_vec[K_1] * Tslot_K_K_1 + b2 - TFE[K]
-      error_f1 ^ 2 + error_f2 ^ 2
-    }))
+    # Vectorized residuals over every lag-1 step.
+    error_f1 = TGE[K_1] + R * a1 * vij * Tslot + b1 - TGE[K_1 + 1L]
+    error_f2 = TFE[K_1] + rho_vec * R * a2 * S_vec * Tslot + b2 - TFE[K_1 + 1L]
+    MSE = base::mean(error_f1^2 + error_f2^2)
+
     if (!base::is.finite(MSE)) return(bad_loss)
     return(MSE)
   }, lower = 0.01, upper = 0.99, method = "Brent")

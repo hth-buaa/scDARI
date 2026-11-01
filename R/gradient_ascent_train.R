@@ -1,68 +1,90 @@
 #' @title Gradient Ascent for Local Parameter Refinement
 #'
-#' @description Performs gradient ascent to maximize the scDARI training objective.
-#' It combines numerical gradients, a Brent line search for the learning rate,
-#' bound clipping and early stopping to refine parameters after a global search.
+#' @description Maximizes the scDARI training objective with gradient ascent,
+#' used to refine a candidate already found by a global search. Each iteration
+#' computes a numerical gradient, selects the learning rate with a Brent line
+#' search, clips the candidate to the parameter box and accepts it only when
+#' the objective increases; the first non-improving iteration ends the search.
 #'
-#' @param iterations Positive integer. Maximum number of gradient ascent
-#' iterations.
-#' @param alpha_lower Tiny positive numeric. Lower bound of the learning-rate
-#' search range.
-#' Defaults to 1e-5.
-#' @param alpha_upper Tiny positive numeric. Upper bound of the learning-rate
-#' search range.
-#' Defaults to 1e-3.
-#' @param alpha_guess Numeric within the search range. Initial guess for the
-#' learning rate.
-#' Defaults to 1e-4.
-#' @param init_theta Numeric vector. Starting parameters, typically the solution
-#' of a global search such as the genetic algorithm.
-#' @param h_max Tiny positive numeric. Maximum finite-difference step size.
-#' Defaults to 0.01.
+#' @param iterations Positive integer. Hard upper bound on the number of
+#' gradient-ascent iterations; training may stop earlier on a non-improving
+#' step.
+#' @param alpha_lower Tiny positive numeric. Lower end of the learning-rate
+#' search interval. Defaults to 1e-5. Paired with \code{alpha_upper} and
+#' enclosing \code{alpha_guess}.
+#' @param alpha_upper Tiny positive numeric. Upper end of the learning-rate
+#' search interval. Defaults to 1e-3. Paired with \code{alpha_lower}.
+#' @param alpha_guess Numeric within the search interval. Starting point of
+#' the Brent search and the value returned if no better rate exists. Defaults
+#' to 1e-4. Closely related to the two interval bounds.
+#' @param init_theta Numeric vector of length 11. Starting parameters,
+#' typically the best solution of the genetic algorithm; the initial objective
+#' is evaluated at this point.
+#' @param h_max Tiny positive numeric. Upper cap on the finite-difference
+#' step, forwarded to \code{\link{f_train_cal_gr}}. Defaults to 0.01.
 #' @param h_min_percent Tiny positive numeric. Finite-difference step as a
-#' fraction of the parameter range.
-#' Defaults to 0.01.
-#' @param ncores Positive integer. Number of cores for parallel gradient
-#' evaluation via \code{\link[parallel]{mclapply}}.
-#' Defaults to 1; set to 1 on Windows.
-#' @param params_lower Numeric vector. Lower parameter bounds.
-#' @param params_upper Numeric vector. Upper parameter bounds.
-#' @param monitor Logical. Whether to report iteration progress with messages.
-#' Defaults to FALSE.
+#' fraction of each parameter's range, forwarded to
+#' \code{\link{f_train_cal_gr}}. Defaults to 0.01. Closely related to
+#' \code{h_max} and the bound vectors.
+#' @param ncores Positive integer. Cores used for the parallel gradient,
+#' forwarded to \code{\link{f_train_cal_gr}}. Defaults to 1; use 1 on Windows.
+#' @param params_lower Numeric vector. Lower parameter bounds in the order of
+#' \code{params_names}; used both for the gradient ranges and for clipping
+#' candidate points. Paired with \code{params_upper}.
+#' @param params_upper Numeric vector. Upper parameter bounds in the order of
+#' \code{params_names}; paired with \code{params_lower}.
+#' @param monitor Logical. Whether to print the iteration, objective, learning
+#' rate and core count after each step. Defaults to \code{FALSE}, i.e. silent.
 #' @param params_names Character vector. Names corresponding to the parameter
-#' elements.
-#' @param train_data Data frame. Training data for one TF-TG pair.
-#' @param tau Positive numeric. Regulatory binarization threshold.
-#' @param Tslot_K Positive numeric vector. Pseudotime interval lengths.
-#' @param params_init Numeric vector. Initial parameter values.
+#' elements; used when the context has to be built.
+#' @param train_data Data frame or one-row matrix. Training data for one
+#' regulon; used when the context has to be built.
+#' @param tau Numeric strictly between 0 and 1. Regulatory binarization
+#' threshold; used when the context has to be built.
+#' @param Tslot_K Positive numeric vector. Pseudotime interval lengths; used
+#' when the context has to be built.
+#' @param params_init Numeric vector. Initial parameter values; retained for
+#' the currently disabled boundary barrier and not used in the result.
+#' @param ctx Optional list. Fixed context from \code{\link{f_train_context}}.
+#' Defaults to \code{NULL}, so the context is built once internally and the
+#' function remains usable standalone; a prebuilt context is the fast path.
+#' Closely related to the context-building arguments.
 #'
-#' @return List with two elements:
+#' @return A list with two elements:
 #' \itemize{
-#'   \item \code{parameters}: parameter vector achieving the reported objective.
+#'   \item \code{parameters}: parameter vector achieving the reported
+#'     objective.
 #'   \item \code{objective_value}: maximum objective value achieved.
 #' }
-#' The search stops when an iteration does not improve the objective,
-#' and the returned parameters remain consistent with the reported objective.
+#' The two elements are always consistent: on a non-improving iteration the
+#' previous point and its objective are returned, and after exhausting
+#' \code{iterations} the last accepted point is returned.
 #'
-#' @details Each iteration follows the workflow below:
+#' @details Every iteration follows the same sequence:
 #' \enumerate{
-#'   \item Computes the numerical gradient, and skips zero-gradient coordinates.
-#'   \item Selects the learning rate with a Brent line search via
-#'     \code{\link[stats]{optim}}.
-#'   \item Builds the candidate point and clips it to the parameter bounds.
-#'   \item Commits the candidate only when the objective increases;
-#'     otherwise the previous point is kept and the search stops.
+#'   \item Computes the numerical gradient with \code{\link{f_train_cal_gr}}
+#'     and marks zero-gradient coordinates as fixed.
+#'   \item Runs a Brent line search with \code{\link[stats]{optim}}, minimizing
+#'     the negated objective over the learning-rate interval.
+#'   \item Builds the candidate at the selected rate and clips it to the
+#'     parameter box.
+#'   \item Accepts the candidate only when it strictly improves the objective;
+#'     otherwise the previous point is kept and the function returns.
 #' }
 #'
 #' @note
 #' \itemize{
-#'   \item Gradients use forward finite differences, which are cheaper but less
-#'     accurate than central differences.
-#'   \item This function is intended for local refinement after a global search,
-#'     not for training from a random initialization.
-#'   \item Parallel gradients rely on \code{\link[parallel]{mclapply}};
-#'     set \code{ncores = 1} on Windows.
+#'   \item Gradients use forward finite differences, cheaper but less accurate
+#'     than central differences.
+#'   \item This is a local refinement step; starting from a random point rather
+#'     than a GA solution is not the intended use.
+#'   \item Parallel gradients use \code{\link[parallel]{mclapply}}; keep
+#'     \code{ncores = 1} on Windows.
 #' }
+#'
+#' @seealso Internally uses \code{\link{f_train_context}},
+#'   \code{\link{f_train_core}} and \code{\link{f_train_cal_gr}}. Called by
+#'   \code{\link{model_train}}.
 #'
 #' @export
 #'
@@ -97,14 +119,18 @@ gradient_ascent_train = function(
     train_data,
     tau,
     Tslot_K,
-    params_init
+    params_init,
+    ctx = NULL
 ) {
+  if (base::is.null(ctx)) {
+    ctx = scDARI::f_train_context(
+      params_names = params_names, train_data = train_data,
+      tau = tau, Tslot_K = Tslot_K
+    )
+  }
+
   theta = base::as.numeric(init_theta)
-  f0 = scDARI::f_train_cal(
-    params = theta, params_names = params_names, train_data = train_data,
-    tau = tau, Tslot_K = Tslot_K, params_init = params_init,
-    params_upper = params_upper, params_lower = params_lower
-  )
+  f0 = scDARI::f_train_core(params = theta, ctx = ctx)
 
   for (i in base::seq_len(iterations)) {
     # Numerical gradient; zero-gradient coordinates are not updated.
@@ -112,7 +138,7 @@ gradient_ascent_train = function(
       params = theta, h_max = h_max, h_min_percent = h_min_percent,
       ncores = ncores, params_names = params_names, train_data = train_data,
       tau = tau, Tslot_K = Tslot_K, params_upper = params_upper,
-      params_lower = params_lower, params_init = params_init
+      params_lower = params_lower, params_init = params_init, ctx = ctx
     )
     grad_need_cal = grad != 0
 
@@ -123,10 +149,7 @@ gradient_ascent_train = function(
         base::pmax(theta[grad_need_cal] + al * grad[grad_need_cal],
                    params_lower[grad_need_cal]),
         params_upper[grad_need_cal])
-      -scDARI::f_train_cal(
-        params = theta_new, params_names = params_names, train_data = train_data,
-        tau = tau, Tslot_K = Tslot_K, params_init = params_init,
-        params_upper = params_upper, params_lower = params_lower)
+      -scDARI::f_train_core(params = theta_new, ctx = ctx)
     }, lower = alpha_lower, upper = alpha_upper, method = "Brent")
 
     # Candidate point at the selected learning rate.
@@ -159,4 +182,3 @@ gradient_ascent_train = function(
 
   base::list(parameters = theta, objective_value = f0)
 }
-

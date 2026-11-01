@@ -26,125 +26,131 @@ model_train(
 )
 }
 \arguments{
-\item{interest_cell_type_branch_training_set}{List.
-Output of \code{\link{select_training_set}},
-containing branch-level training data with expression and activity features.}
+\item{interest_cell_type_branch_training_set}{Nested list. Output of
+\code{\link{select_training_set}}. For each cell type it holds a branch
+training data frame with the \code{TF, TG, theta_i} columns and the
+alternating \code{TFE_k}/\code{TGE_k} group columns, plus an \code{all}
+table used to build the integrated result.}
 
 \item{initial_params}{Data frame. Output of \code{\link{initialize_params}},
-containing the initialization, upper bounds and lower bounds of the model parameters.}
+with one row per parameter and three columns: \code{initialization},
+\code{upper} and \code{lower}. It supplies the shared starting values and
+the feasible box used by the GA and gradient clipping.}
 
-\item{interest_cell_type_group}{List. Output of \code{\link{cell_grouping}},
-containing pseudotime interval lengths for each branch.}
+\item{interest_cell_type_group}{Nested list. Output of
+\code{\link{cell_grouping}}, providing per-branch pseudotime interval
+lengths \code{Branches_Tslot_k} and the group structure used during
+fitting.}
 
-\item{interest_cell_type_tau}{Named numeric vector.
-Output of \code{\link{get_cell_type_tau}},
-the cell-type-specific binarization thresholds.}
+\item{interest_cell_type_tau}{Named numeric vector. Output of
+\code{\link{get_cell_type_tau}}, giving one binarization threshold per
+cell type; the threshold is passed to the effect-efficiency calculation
+and used to binarize the predicted strength.}
 
-\item{interest_cell_type_genes_pseudotime_info}{List.
-Output of \code{\link{get_genes_pseudotime_info}},
-containing branch cell counts used to weight the integrated results.}
+\item{interest_cell_type_genes_pseudotime_info}{Nested list. Output of
+\code{\link{get_genes_pseudotime_info}}, providing the branch cell counts
+\code{Branches_n_cell} that weight the integrated continuous values.}
 
-\item{max_epochs}{Positive integer.
-Maximum number of training epochs.
-Defaults to 1000.}
+\item{max_epochs}{Positive integer. Hard cap on the number of epochs,
+where one epoch is one GA run plus one gradient-ascent run. Defaults to
+1000. Related to \code{early_stop}, which usually ends training earlier.}
 
-\item{early_stop}{Positive integer.
-Number of consecutive epochs without loss improvement that triggers early stopping.
-Defaults to 10.}
+\item{early_stop}{Positive integer. Number of consecutive epochs without
+loss improvement that triggers stopping. Defaults to 10. A smaller value
+stops sooner; used together with \code{max_epochs}, \code{eps_theta} and
+\code{eps_loss}.}
 
-\item{eps_theta}{Tiny positive numeric.
-Threshold at which the predicted regulatory strength is considered converged to the observed strength.
-Defaults to 1e-3.}
+\item{eps_theta}{Tiny positive numeric. Tolerance below which the
+predicted strength is treated as converged to the observed
+\code{theta_i}. Defaults to 1e-3. Related to \code{early_stop}.}
 
-\item{eps_loss}{Tiny positive numeric.
-Threshold for negligible loss improvement.
-Defaults to 1e-5.}
+\item{eps_loss}{Tiny positive numeric. Loss improvement smaller than
+this is treated as negligible. Defaults to 1e-5. Related to
+\code{early_stop}.}
 
-\item{popSize_ga}{Integer. Population size of the genetic algorithm.
-Defaults to 50.
-See \code{popSize} in \code{\link[GA]{ga}}.}
+\item{popSize_ga}{Positive integer. GA population size. Defaults to 50.
+Larger populations explore more widely at higher cost. Maps to
+\code{popSize} in \code{\link[GA]{ga}}; related to \code{maxiter_ga}.}
 
-\item{maxiter_ga}{Positive integer.
-Maximum generations per genetic algorithm run.
-Defaults to 150.
-See \code{maxiter} in \code{\link[GA]{ga}}.}
+\item{maxiter_ga}{Positive integer. Maximum generations per GA run.
+Defaults to 150. Maps to \code{maxiter} in \code{\link[GA]{ga}}.}
 
-\item{pcrossover_ga}{Numeric between 0 and 1. Crossover probability.
-Defaults to 0.9.
-See \code{pcrossover} in \code{\link[GA]{ga}}.}
+\item{pcrossover_ga}{Numeric in [0, 1]. GA crossover probability.
+Defaults to 0.9. Maps to \code{pcrossover} in \code{\link[GA]{ga}}.}
 
-\item{pmutation_ga}{Numeric between 0 and 1. Mutation probability.
-Defaults to 0.5.
-See \code{pmutation} in \code{\link[GA]{ga}}.}
+\item{pmutation_ga}{Numeric in [0, 1]. GA mutation probability.
+Defaults to 0.5. Maps to \code{pmutation} in \code{\link[GA]{ga}}.}
 
-\item{parallel_ga}{Logical. Whether the genetic algorithm runs in parallel.
-Defaults to FALSE.
-See \code{parallel} in \code{\link[GA]{ga}}.}
+\item{parallel_ga}{Logical. Whether each GA run itself evaluates in
+parallel. Defaults to \code{FALSE}, i.e. serial and deterministic given
+\code{seed_ga}. Maps to \code{parallel} in \code{\link[GA]{ga}}.}
 
-\item{seed_ga}{Integer.
-Random seed for reproducible genetic algorithm results.
-Defaults to 123.
-See \code{seed} in \code{\link[GA]{ga}}.}
+\item{seed_ga}{Integer. Random seed of the GA. Defaults to 123, fixing
+the result for reproducibility; set a random value for non-reproducible
+runs. Maps to \code{seed} in \code{\link[GA]{ga}}.}
 
-\item{iterations_grad}{Positive integer.
-Number of gradient ascent steps per epoch.
-Defaults to 30.
-See \code{iterations} in \code{\link{gradient_ascent_train}}}
+\item{iterations_grad}{Positive integer. Maximum gradient-ascent steps
+per epoch. Defaults to 30. Maps to \code{iterations} in
+\code{\link{gradient_ascent_train}}; related to \code{ncores_grad}.}
 
-\item{ncores_grad}{Positive integer.
-Cores for parallel gradient evaluation within gradient ascent.
-Defaults to 1.
-See \code{ncores} in \code{\link{gradient_ascent_train}}}
+\item{ncores_grad}{Positive integer. Cores used to evaluate the gradient
+inside each epoch. Defaults to 1; increase only on Linux/macOS. Maps to
+\code{ncores} in \code{\link{gradient_ascent_train}}.}
 
-\item{ncores}{Positive integer.
-Cores for regulon-level parallel evaluation via \code{\link[parallel]{mclapply}}.
-Defaults to 1; set to 1 on Windows.}
+\item{ncores}{Positive integer. Cores for regulon-level parallelism via
+\code{\link[parallel]{mclapply}}. Defaults to 1, the only supported
+value on Windows; on Linux set it near the available core count.}
 }
 \value{
-Nested list organized by cell type, each entry containing:
+A nested list keyed by cell type. Each entry contains:
 \itemize{
-\item \code{best_pred_result}: integrated data frame across branches, with
-predicted regulatory strength, binarized result, fitting loss and
-training metadata.
-\item \code{branch*}: detailed results for every regulon in the branch,
-including training data, pseudotime intervals, threshold, objective
-values, parameter trajectories, loss history, best epoch, best
-parameters, best prediction, stop cause, training time and total epochs.
+\item \code{best_pred_result}: integrated data frame across branches,
+holding the predicted strength and its binarized value, fitting
+loss, the absolute strength difference and per-branch training
+metadata (time, epochs, best epoch, stop cause).
+\item \code{branch1}, \code{branch2}, ...: one element per branch,
+itself a list per regulon with the training data, interval lengths,
+threshold, objective and parameter trajectories, loss history,
+best epoch, best parameters, best prediction, stop cause, training
+time and total epochs.
 }
 }
 \description{
-Trains a model for every TF-TG pair across cell types and branches
-with a hybrid strategy combining genetic-algorithm global search and gradient-ascent local refinement.
-Multiple early stopping criteria are supported, and regulons can be trained in parallel.
+Top-level training entry point. For every cell type and branch
+it fits one dynamical model per TF-TG pair (regulon) with a hybrid
+strategy: a genetic algorithm for global exploration followed by gradient
+ascent for local refinement, repeated over epochs until a stopping
+condition is met. Regulons are independent and train in parallel, and the
+branch results are integrated into one per-cell-type summary.
 }
 \details{
-For each cell type and branch, every TF-TG pair is trained
-independently:
+Regulons are trained independently, and the workflow is:
 \enumerate{
-\item The genetic algorithm population is initialized from the shared parameter template.
-\item Each epoch runs two stages:
-\itemize{
-\item Stage 1: genetic algorithm for global exploration,
-initialized with the previous epoch's best solution.
-\item Stage 2: gradient ascent for local refinement from the best GA solution.
-}
-\item After each epoch, stopping conditions are checked in priority order:
-maximum epochs reached, no loss improvement for consecutive epochs,
-predicted strength converged to observed strength, negligible loss improvement.
-\item Results are integrated across branches: binary relationships use union logic,
-and continuous values are weighted by branch cell counts.
+\item Initializes the GA population from the shared parameter template.
+\item Within each epoch, runs the GA for global exploration and then
+gradient ascent from the best GA point; the refined point seeds the
+next epoch's population.
+\item After each epoch, checks the stopping conditions in priority
+order: maximum epochs, no improvement for \code{early_stop} epochs,
+predicted strength converged within \code{eps_theta}, and loss
+improvement below \code{eps_loss}.
+\item Integrates the branches: binary edges use union logic, while
+continuous strengths and losses are weighted by branch cell counts.
 }
 }
 \note{
 \itemize{
-\item The function creates and switches to the \code{4 Build Prediction Model} directory,
-and restores the original working directory on exit.
-\item Regulons are trained independently,
-enabling regulon-level parallel computing through \code{ncores}.
-\item When \code{parallel_ga = TRUE},
-an additional serial GA iteration is run after the parallel GA to reduce result instability.
-\item Larger population,
-iteration count or mutation probability can help escape local optima at the cost of runtime.
+\item The function creates and enters the \code{4 Build Prediction
+    Model} directory and restores the original working directory on
+exit.
+\item When \code{parallel_ga = TRUE}, an extra serial GA iteration is
+run after the parallel one to reduce result instability.
+\item A larger population, iteration count or mutation probability
+helps escape local optima at the cost of runtime.
+\item For each regulon, a fixed context is built once with
+\code{\link{f_train_context}} and reused by every GA and
+gradient-ascent evaluation, avoiding repeated grep, sorting and
+allocation.
 }
 }
 \examples{
@@ -205,5 +211,8 @@ base::saveRDS(
 }
 }
 \seealso{
-\code{\link{f_train_cal}}, \code{\link{loss_cal}}, \code{\link{theta_p_cal}}
+Internally uses \code{\link{f_train_context}},
+\code{\link{f_train_cal}}, \code{\link{gradient_ascent_train}},
+\code{\link{loss_cal}} and \code{\link{theta_p_cal}}. This is the
+top-level entry point and is not called by another scDARI function.
 }

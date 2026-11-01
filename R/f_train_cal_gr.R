@@ -1,57 +1,74 @@
-#' @title Numerical Gradient of the scDARI Training Objective
+#' @title Numerical Gradient of the Training Objective
 #'
-#' @description Computes the numerical gradient of the scDARI training objective
-#' using forward finite differences.
-#' The partial derivatives with respect to the model parameters can be evaluated
-#' in parallel, providing the search direction for gradient-based optimization.
+#' @description Approximates the gradient of the scDARI training objective with
+#' forward finite differences, one partial derivative per model parameter.
+#' The baseline objective is evaluated once and reused, and the partial
+#' derivatives can be computed in parallel. The returned vector supplies the
+#' search direction for \code{\link{gradient_ascent_train}}.
 #'
-#' @param params Numeric vector. Model parameters for one TF-TG pair,
-#' with order matching \code{params_names}.
-#' @param h_max Tiny positive numeric. Maximum finite-difference step size.
-#' Defaults to 0.01.
-#' @param h_min_percent Tiny positive numeric. Step size as a fraction of the
-#' parameter range, used together with \code{h_max}.
-#' Defaults to 0.01.
-#' @param ncores Positive integer. Number of cores for parallel evaluation of the
-#' partial derivatives.
-#' Defaults to 1.
+#' @param params Numeric vector of length 11. Model parameters for one regulon
+#' in the order of \code{params_names}; the point at which the gradient is
+#' evaluated.
+#' @param h_max Tiny positive numeric. Upper cap on the finite-difference step.
+#' Defaults to 0.01. Used together with \code{h_min_percent}: the effective
+#' step is the smaller of the two candidates. Callers may override it, for
+#' example \code{\link{model_train}} passes a smaller value.
+#' @param h_min_percent Tiny positive numeric. Step expressed as a fraction of
+#' each parameter's range \code{params_upper - params_lower}. Defaults to 0.01,
+#' i.e. one percent of the range. Closely related to \code{h_max} and to the
+#' two bound vectors.
+#' @param ncores Positive integer. Number of cores used to evaluate the partial
+#' derivatives. Defaults to 1, which runs a serial \code{vapply}; values greater
+#' than 1 fork with \code{\link[parallel]{mclapply}}.
 #' @param params_names Character vector. Names corresponding to the elements of
-#' \code{params}.
-#' @param train_data Data frame. Training data for one pair, containing the prior
-#' regulatory strength \code{theta_i} and group expression columns prefixed with
-#' \code{TFE_} and \code{TGE_}.
-#' @param tau Positive numeric. Regulatory binarization threshold.
-#' @param Tslot_K Positive numeric vector. Pseudotime interval lengths.
-#' @param params_upper Numeric vector. Upper parameter bounds.
-#' @param params_lower Numeric vector. Lower parameter bounds.
-#' @param params_init Numeric vector. Initial parameter values.
+#' \code{params}; used only when the context has to be built.
+#' @param train_data Data frame or one-row matrix. Training data for one
+#' regulon; used only when the context has to be built.
+#' @param tau Numeric strictly between 0 and 1. Regulatory binarization
+#' threshold; used only when the context has to be built.
+#' @param Tslot_K Positive numeric vector. Pseudotime interval lengths; used
+#' only when the context has to be built.
+#' @param params_upper Numeric vector. Upper parameter bounds in the order of
+#' \code{params_names}. Together with \code{params_lower} it sets the
+#' range-based step and keeps every perturbed point inside the feasible box.
+#' @param params_lower Numeric vector. Lower parameter bounds in the order of
+#' \code{params_names}; paired with \code{params_upper}.
+#' @param params_init Numeric vector. Initial parameter values; retained for
+#' the currently disabled boundary barrier and not used in the result.
+#' @param ctx Optional list. Fixed context from \code{\link{f_train_context}}.
+#' Defaults to \code{NULL}, so the context is built once internally and the
+#' function stays usable standalone; a prebuilt context avoids rebuilding it.
+#' Closely related to the context-building arguments.
 #'
-#' @return Numeric vector of the same length as \code{params}, the partial
-#' derivatives of the training objective approximated by forward differences.
-#' NA and infinite components are replaced with 0.
+#' @return Numeric vector of the same length and order as \code{params},
+#' holding the forward-difference partial derivatives of the training
+#' objective. A parameter already at its upper bound, or a non-finite
+#' derivative, is replaced with 0 so it carries no usable direction.
 #'
-#' @details The step size and derivatives are formed as follows:
+#' @details The gradient is formed as follows:
 #' \enumerate{
-#'   \item For each parameter, the step is the minimum of \code{h_max} and
-#'     \code{h_min_percent} times the parameter range.
-#'   \item The baseline objective is computed once and reused for every partial
-#'     derivative.
-#'   \item Each perturbed point is kept within the bounds; when the parameter is
-#'     already at its upper bound, the partial derivative is set to 0.
-#'   \item Partial derivatives are evaluated with \code{\link[parallel]{mclapply}},
-#'     and non-finite components are replaced with 0.
+#'   \item Ensures a context and computes the baseline objective once.
+#'   \item Sets each parameter's step to the minimum of \code{h_max} and
+#'     \code{h_min_percent} times its range.
+#'   \item Perturbs one parameter at a time, clipping the point to the upper
+#'     bound; if the point cannot move, the derivative is set to 0.
+#'   \item Divides the objective change by the actual step length, evaluating
+#'     the coordinates in parallel when \code{ncores > 1}, and replaces
+#'     non-finite components with 0.
 #' }
 #'
 #' @note
 #' \itemize{
-#'   \item Internally calls \code{\link{f_train_cal}}.
 #'   \item Forward differences are cheaper but less accurate than central
 #'     differences.
-#'   \item Parallel evaluation relies on \code{\link[parallel]{mclapply}};
-#'     set \code{ncores = 1} on Windows.
+#'   \item The objective is evaluated directly through
+#'     \code{\link{f_train_core}}, not through \code{\link{f_train_cal}}.
+#'   \item Parallel evaluation uses \code{\link[parallel]{mclapply}}, which is
+#'     not fork-safe on Windows; keep \code{ncores = 1} there.
 #' }
 #'
-#' @seealso \code{\link{f_train_cal}}, \code{\link{gradient_ascent_train}}
+#' @seealso Internally uses \code{\link{f_train_context}} and
+#'   \code{\link{f_train_core}}. Called by \code{\link{gradient_ascent_train}}.
 #'
 #' @export
 #'
@@ -82,35 +99,44 @@ f_train_cal_gr = function(
     Tslot_K = Tslot_K,
     params_upper = params_upper,
     params_lower = params_lower,
-    params_init = params_init
+    params_init = params_init,
+    ctx = NULL
 ) {
   vec = base::as.numeric(params)
   n = base::length(vec)
 
+  if (base::is.null(ctx)) {
+    ctx = scDARI::f_train_context(
+      params_names = params_names, train_data = train_data,
+      tau = tau, Tslot_K = Tslot_K
+    )
+  }
+
   # Baseline objective at the current point.
-  f0 = scDARI::f_train_cal(
-    params = vec, params_names = params_names, train_data = train_data,
-    tau = tau, Tslot_K = Tslot_K, params_init = params_init,
-    params_upper = params_upper, params_lower = params_lower
-  )
+  f0 = scDARI::f_train_core(params = vec, ctx = ctx)
 
   # Per-parameter step: minimum of h_max and h_min_percent of the range.
   h_vec = base::pmin(base::rep(h_max, n),
                      (params_upper - params_lower) * h_min_percent)
 
-  grad = base::unlist(parallel::mclapply(base::seq_len(n), function(i) {
-    par_perturb = vec
+  one_derivative = function(i) {
     # Keep the perturbed point within bounds; at the upper bound, return 0.
     perturbed = base::min(vec[i] + h_vec[i], params_upper[i])
     if (perturbed == vec[i]) return(0)
+    par_perturb = vec
     par_perturb[i] = perturbed
-    gr = (scDARI::f_train_cal(
-      params = par_perturb, params_names = params_names, train_data = train_data,
-      tau = tau, Tslot_K = Tslot_K, params_init = params_init,
-      params_upper = params_upper, params_lower = params_lower
-    ) - f0) / (perturbed - vec[i])
-    return(gr)
-  }, mc.cores = ncores, mc.silent = TRUE, mc.allow.recursive = FALSE))
+    (scDARI::f_train_core(params = par_perturb, ctx = ctx) - f0) /
+      (perturbed - vec[i])
+  }
+
+  if (ncores > 1) {
+    grad = base::unlist(parallel::mclapply(
+      base::seq_len(n), one_derivative,
+      mc.cores = ncores, mc.silent = TRUE, mc.allow.recursive = FALSE
+    ))
+  } else {
+    grad = base::vapply(base::seq_len(n), one_derivative, numeric(1))
+  }
 
   # Non-finite components carry no usable direction.
   grad[base::is.na(grad) | base::is.infinite(grad)] = 0

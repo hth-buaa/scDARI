@@ -2,7 +2,7 @@
 % Please edit documentation in R/loss_cal.R
 \name{loss_cal}
 \alias{loss_cal}
-\title{Calculate the Pure Prediction Loss for a Single TF-TG Pair}
+\title{Calculate the Pure Prediction Loss for One TF-TG Pair}
 \usage{
 loss_cal(
   data = train_data,
@@ -13,52 +13,58 @@ loss_cal(
 )
 }
 \arguments{
-\item{data}{Data frame. Data for one TF-TG pair, containing the prior
-regulatory strength \code{theta_i} and group expression columns prefixed with
-\code{TFE_} and \code{TGE_}.}
+\item{data}{Data frame or one-row matrix. Data for one regulon, containing
+the prior strength \code{theta_i} and the group columns prefixed with
+\code{TFE_} and \code{TGE_}. Defaults to a \code{train_data} variable in
+the calling environment, so explicit passing is preferred in saved scripts.
+Closely related to \code{Tslot_K}, which gives the interval lengths for
+the same groups.}
 
-\item{params}{Numeric vector. Fitted model parameter vector.}
+\item{params}{Numeric vector of length 11. Fitted model parameters.
+Defaults to \code{result_gradient$parameters} from the calling
+environment; elements are read by name after \code{params_names} is
+attached. Closely related to \code{params_names}.}
 
-\item{params_names}{Character vector. Names corresponding to the elements of
-\code{params}.}
+\item{params_names}{Character vector. Names corresponding to the elements
+of \code{params}, used to name the vector before each parameter is read.}
 
-\item{tau}{Positive numeric. Regulatory binarization threshold.}
+\item{tau}{Numeric strictly between 0 and 1. Regulatory binarization
+threshold, used to compute the effect efficiency \eqn{R}.}
 
-\item{Tslot_K}{Positive numeric vector. Pseudotime interval lengths.}
+\item{Tslot_K}{Positive numeric vector. Pseudotime interval lengths
+between consecutive groups; the lag-1 subset multiplies the residuals.}
 }
 \value{
-Single finite numeric value. Equal-weight mean squared prediction
-error, averaged over lag-1 steps as
-\eqn{\mathrm{mean}(error_{f_1}^2 + error_{f_2}^2)};
-lower values indicate better prediction.
-Non-feasible evaluations return the large positive fallback \eqn{10^{12}}.
+A single finite numeric value, the equal-weight mean squared
+prediction error \eqn{\mathrm{mean}(error_{f_1}^2 + error_{f_2}^2)} over
+lag-1 steps; lower is better. A non-feasible evaluation, with a non-finite
+\eqn{R} or MSE, returns the large positive fallback \eqn{10^{12}}.
 }
 \description{
-Computes the equal-weight mean squared prediction error for one
-TF-TG pair using fitted parameters.
-It contains only the prediction error of the two update equations, without
-regularization or stability terms, and is used for model evaluation.
+Computes the equal-weight mean squared prediction error of the
+two update equations for one regulon using fitted parameters. It contains
+only prediction error, with no correction-term or stability penalty and no
+negation, so it is the metric used to monitor fit and to choose the best
+epoch.
 }
 \details{
-The pure prediction loss is computed as follows:
+The loss is computed in one pass:
 \enumerate{
-\item Extracts the TFE and TGE group series from \code{data}.
-\item For each lag-1 step, forms the prediction errors of \eqn{f_1} and
-\eqn{f_2}, and returns the mean of their squared errors.
+\item Locates the \code{TFE_}/\code{TGE_} columns by name and extracts
+the two group series.
+\item Computes \eqn{R}, the Hill saturations \eqn{v_i}, \eqn{v_j}, the
+clamped \eqn{v_j} and the feedback strength \eqn{S}.
+\item Forms the vectorized residuals of the two update equations over
+every lag-1 step and returns the mean of their squared errors.
 }
 }
 \note{
 \itemize{
-\item Differs from \code{\link{f_train_cal}}:
-this function excludes the correction and stability terms,
-and is neither negated nor scaled.
-\item \code{data} must contain columns prefixed with \code{TFE_},
-\code{TGE_} and a column named \code{theta_i}.
-\item It can be applied to training, validation or test datasets.
-\item Computes the effect efficiency \eqn{R} via \code{\link{R_cal}}.
-\item Computes the Hill saturations \eqn{v_i}, \eqn{v_j} via \code{\link{Hill_cal}} and the net rate \eqn{v_i-v_j},
-and clamps \eqn{v_j} away from the endpoints for \eqn{S}.
-\item Computes the derivative of the unimodal feedback effect magnitude \eqn{S} via \code{\link{S_cal}}.
+\item Differs from \code{\link{f_train_cal}}: this function excludes the
+correction and stability terms and is neither negated nor scaled.
+\item \code{data} must contain a \code{theta_i} column and
+\code{TFE_}/\code{TGE_} columns.
+\item The same function works on training, validation or test data.
 }
 }
 \examples{
@@ -71,4 +77,8 @@ train_loss = loss_cal(
   Tslot_K = Tslot_K
 )
 }
+}
+\seealso{
+Internally uses \code{\link{R_cal}}, \code{\link{Hill_cal}} and
+\code{\link{S_cal}}. Called by \code{\link{model_train}}.
 }

@@ -10,7 +10,8 @@ calculate_iGRN(
   replicate_time = 10,
   k = 3,
   noise = 1e-12,
-  seed = 123
+  seed = 123,
+  keep_all_edges = TRUE
 )
 }
 \arguments{
@@ -37,6 +38,8 @@ Defaults to \code{1e-12}.}
 \item{seed}{Single integer passed to \code{\link[base]{set.seed}} before the MI replicates to ensure reproducibility,
 or \code{NULL} to leave the random number generator untouched.
 Defaults to \code{123}.}
+
+\item{keep_all_edges}{Logical. Defaults to TRUE: replace the zero value in the calculated iGRN with half of the non-zero minimum value.}
 }
 \value{
 A named list with one element per cell type. Each element is a data frame used as an association matrix:
@@ -68,6 +71,7 @@ truncates negative z-scores to zero,
 and combines the two sides as \eqn{\sqrt{z_{TG}^{2} + z_{TF}^{2}}} (Faith et al., 2007).
 \item Rank-normalizes the positive scores independently within each TF column to (0, 1] (\code{rank/n} with average ties),
 leaving unsupported edges at \code{0}.
+\item If \code{keep_all_edges} is \code{TRUE}, replace the zero value in the calculated iGRN with half of the non-zero minimum value.
 }
 }
 \note{

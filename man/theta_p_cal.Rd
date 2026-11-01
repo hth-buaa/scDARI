@@ -2,55 +2,65 @@
 % Please edit documentation in R/theta_p_cal.R
 \name{theta_p_cal}
 \alias{theta_p_cal}
-\title{Optimize the Regulatory Strength for a Single TF-TG Pair}
+\title{Optimize the Regulatory Strength for One TF-TG Pair}
 \usage{
 theta_p_cal(data = train_data, best_params, params_names, tau, Tslot_K)
 }
 \arguments{
-\item{data}{Data frame. Data for one TF-TG pair, containing the prior
-regulatory strength \code{theta_i} and group expression columns prefixed with
-\code{TFE_} and \code{TGE_}.}
+\item{data}{Data frame or one-row matrix. Data for one regulon, containing
+the prior strength \code{theta_i} and the group columns prefixed with
+\code{TFE_} and \code{TGE_}. Defaults to a \code{train_data} variable in
+the calling environment. Closely related to \code{Tslot_K}, which gives
+the interval lengths for the same groups.}
 
-\item{best_params}{Numeric vector. Trained model parameters.}
+\item{best_params}{Numeric vector of length 11. Trained model parameters;
+all dynamic parameters are read from it and held fixed. Closely related to
+\code{params_names}.}
 
-\item{params_names}{Character vector. Names corresponding to the elements of
-\code{best_params}.}
+\item{params_names}{Character vector. Names corresponding to the elements
+of \code{best_params}, used to name the vector before each parameter is
+read.}
 
-\item{tau}{Positive numeric. Regulatory binarization threshold.}
+\item{tau}{Numeric strictly between 0 and 1. Regulatory binarization
+threshold. It also defines the optimization starting point, which is
+clamped from \code{tau} to lie strictly inside the search interval.}
 
-\item{Tslot_K}{Positive numeric vector. Pseudotime interval lengths.}
+\item{Tslot_K}{Positive numeric vector. Pseudotime interval lengths
+between consecutive groups; the lag-1 subset multiplies the residuals.}
 }
 \value{
-Single numeric value. Optimal regulatory strength, bounded within
-[0.01, 0.99].
+A single numeric value, the optimal regulatory strength returned
+by the Brent search and always bounded within [0.01, 0.99].
 }
 \description{
-Fixes the trained dynamic parameters and treats the regulatory
-strength as the only variable, using Brent one-dimensional optimization to
-find the value that minimizes the expression prediction error.
+Holds the trained dynamic parameters fixed and treats the
+regulatory strength as the only decision variable, using one-dimensional
+Brent optimization to find the value that minimizes the expression
+prediction error. It is called after parameter training to turn a fitted
+dynamical model into a predicted, continuous regulatory strength.
 }
 \details{
-All dynamic parameters are held fixed and only the regulatory
-strength is optimized:
+Only the regulatory strength varies, and the calculation proceeds
+in three stages:
 \enumerate{
-\item The theta-independent quantities, including the series, Hill
-saturations, boundary factor and feedback strength, are computed once.
-\item The objective is the equal-weight prediction loss used in
-\code{\link{loss_cal}}, with the effect efficiency \eqn{R(\theta)} as the
-only theta-dependent term.
-\item Brent optimization via \code{\link[stats]{optim}} returns the
-regulatory strength minimizing prediction error on [0.01, 0.99].
+\item Computes once every theta-independent quantity: the two series,
+Hill saturations \eqn{v_i}, \eqn{v_j}, clamped \eqn{v_j}, boundary
+factor \eqn{rho}, feedback strength \eqn{S} and interval lengths.
+\item Defines the objective as the equal-weight prediction loss used in
+\code{\link{loss_cal}}; the effect efficiency \eqn{R(\theta)} from
+\code{\link{R_cal}} is the only term that changes with \eqn{theta}.
+\item Runs Brent optimization with \code{\link[stats]{optim}} on
+[0.01, 0.99] and returns the minimizing strength.
 }
 }
 \note{
 \itemize{
-\item Used to infer the regulatory strength after the dynamic parameters are trained.
-\item The 0.01-0.99 bounds avoid extreme values that may cause numerical instability.
-\item Non-feasible evaluations use the large positive fallback \eqn{10^{12}}.
-\item Computes the effect efficiency \eqn{R} via \code{\link{R_cal}}.
-\item Computes the Hill saturations \eqn{v_i}, \eqn{v_j} via \code{\link{Hill_cal}} and the net rate \eqn{v_i-v_j},
-and clamps \eqn{v_j} away from the endpoints for \eqn{S}.
-\item Computes the derivative of the unimodal feedback effect magnitude \eqn{S} via \code{\link{S_cal}}.
+\item The 0.01-0.99 bounds avoid the extreme strengths at which the
+Hill and gating functions can become numerically unstable.
+\item The starting point is clamped to \eqn{0.01 + 10^{-6}, 0.99 - 10^{-6}}
+so it is never placed exactly on an endpoint.
+\item A non-feasible objective evaluation returns the large positive
+fallback \eqn{10^{12}}.
 }
 }
 \examples{
@@ -63,4 +73,9 @@ predicted_theta = theta_p_cal(
   Tslot_K = Tslot_K
 )
 }
+}
+\seealso{
+Internally uses \code{\link{R_cal}}, \code{\link{Hill_cal}} and
+\code{\link{S_cal}}. Called by \code{\link{model_train}}. Related loss
+function: \code{\link{loss_cal}}.
 }

@@ -24,6 +24,7 @@
 #' @param seed Single integer passed to \code{\link[base]{set.seed}} before the MI replicates to ensure reproducibility,
 #' or \code{NULL} to leave the random number generator untouched.
 #' Defaults to \code{123}.
+#' @param keep_all_edges Logical. Defaults to TRUE: replace the zero value in the calculated iGRN with half of the non-zero minimum value.
 #'
 #' @return A named list with one element per cell type. Each element is a data frame used as an association matrix:
 #' \itemize{
@@ -47,6 +48,7 @@
 #'     and combines the two sides as \eqn{\sqrt{z_{TG}^{2} + z_{TF}^{2}}} (Faith et al., 2007).
 #'   \item Rank-normalizes the positive scores independently within each TF column to (0, 1] (\code{rank/n} with average ties),
 #'     leaving unsupported edges at \code{0}.
+#'   \item If \code{keep_all_edges} is \code{TRUE}, replace the zero value in the calculated iGRN with half of the non-zero minimum value.
 #' }
 #'
 #' @note
@@ -115,7 +117,8 @@ calculate_iGRN = function(
     replicate_time = 10,
     k = 3,
     noise = 1e-12,
-    seed = 123
+    seed = 123,
+    keep_all_edges = TRUE
 ) {
   ### Validate parameters.
   if (!(base::is.numeric(replicate_time) && base::length(replicate_time) == 1 &&
@@ -131,6 +134,9 @@ calculate_iGRN = function(
   if (!(base::is.null(seed) ||
         (base::is.numeric(seed) && base::length(seed) == 1 && seed == base::round(seed)))) {
     base::stop("seed must be a single integer or NULL.")
+  }
+  if (!(base::is.logical(keep_all_edges) && base::length(keep_all_edges) == 1)) {
+    base::stop("keep_all_edges must be a single logical.")
   }
   # The two inputs must describe the same set of cell types.
   cell_types = base::names(interest_cell_type_genes_pseudotime_info)
@@ -262,6 +268,16 @@ calculate_iGRN = function(
     message("[", cell_type, "] Applying CLR correction and rank normalization.")
     CLR_cross = CLR_rectangular(MI_cross_avg)
     interest_cell_type_iGRN_all[[cell_type]] = rank01_col(CLR_cross)
+  }
+
+  ### Keep all edges.
+  if (keep_all_edges) {
+    for (cell_type in cell_types) {
+      df = interest_cell_type_iGRN_all[[cell_type]]
+      itheta_min = min(df[df > 0], na.rm = TRUE)
+      df[df == 0] = itheta_min / 2 # Replace zero with half of the non-zero minimum value.
+      interest_cell_type_iGRN_all[[cell_type]] = df
+    }
   }
 
   ### End.

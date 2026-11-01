@@ -2,7 +2,7 @@
 % Please edit documentation in R/f_train_cal.R
 \name{f_train_cal}
 \alias{f_train_cal}
-\title{Calculate the Training Objective for the scDARI Gene Regulatory Network Model}
+\title{Calculate the Training Objective for One TF-TG Pair}
 \usage{
 f_train_cal(
   params,
@@ -12,81 +12,86 @@ f_train_cal(
   Tslot_K,
   params_init,
   params_upper,
-  params_lower
+  params_lower,
+  ctx = NULL
 )
 }
 \arguments{
-\item{params}{Numeric vector. Candidate model parameters for one TF-TG pair,
-with order matching \code{params_names}.}
+\item{params}{Numeric vector of length 11. Candidate model parameters for one
+regulon, in the order given by \code{params_names}. Passed unchanged to
+\code{\link{f_train_core}}.}
 
 \item{params_names}{Character vector. Names corresponding to the elements of
-\code{params}.}
+\code{params}; used only when the context has to be built.}
 
-\item{train_data}{Data frame. Training data for one pair, containing the prior
-regulatory strength \code{theta_i} and group expression columns prefixed with
-\code{TFE_} and \code{TGE_}.}
+\item{train_data}{Data frame or one-row matrix. Training data for one
+regulon, containing the prior strength \code{theta_i} and the alternating
+\code{TFE_k}/\code{TGE_k} group columns; used only when the context has to
+be built.}
 
-\item{tau}{Positive numeric. Regulatory binarization threshold, used to compute
-the effect efficiency \eqn{R}.}
+\item{tau}{Numeric strictly between 0 and 1. Regulatory binarization
+threshold, used to compute the effect efficiency \eqn{R}; used only when the
+context has to be built.}
 
 \item{Tslot_K}{Positive numeric vector. Pseudotime interval lengths between
-consecutive groups.}
+consecutive groups; used only when the context has to be built.}
 
-\item{params_init}{Numeric vector. Initial parameter values, with order matching
-\code{params_names}; retained for the currently disabled boundary barrier.}
+\item{params_init}{Numeric vector. Initial parameter values in the order of
+\code{params_names}. Retained for the currently disabled boundary barrier
+and therefore not used in the returned value.}
 
-\item{params_upper}{Numeric vector. Upper parameter bounds, with order matching
-\code{params_names}; retained for the currently disabled boundary barrier.}
+\item{params_upper}{Numeric vector. Upper parameter bounds in the order of
+\code{params_names}; retained for the disabled boundary barrier.}
 
-\item{params_lower}{Numeric vector. Lower parameter bounds, with order matching
-\code{params_names}; retained for the currently disabled boundary barrier.}
+\item{params_lower}{Numeric vector. Lower parameter bounds in the order of
+\code{params_names}; retained for the disabled boundary barrier.}
+
+\item{ctx}{Optional list. Fixed context from \code{\link{f_train_context}}.
+Defaults to \code{NULL}, meaning the context is built once internally from
+\code{params_names}, \code{train_data}, \code{tau} and \code{Tslot_K}, so
+the function remains usable on its own. Supplying a prebuilt context avoids
+rebuilding it on every call and is the fast path used by
+\code{\link{model_train}}. Closely related to the four context-building
+arguments above.}
 }
 \value{
-A single finite numeric value, the negated and scaled training objective;
-higher values correspond to lower loss and better fit.
-The objective combines:
-\itemize{
-\item Equal-weight mean squared error of the two update equations,
-averaged over lag-1 steps as \eqn{\mathrm{mean}(error_{f_1}^2 + error_{f_2}^2)}.
-\item Correction-term penalty \eqn{\beta_1^2 + \beta_2^2}.
-\item Discrete-stability penalty, derived from the eigenvalues of the
-linearization and the upper-quartile pseudotime step.
-}
-Non-feasible individuals, with non-finite intermediate values,
-return the finite fallback \eqn{-10^{12}}.
+A single finite numeric value, the negated and scaled training
+objective; higher is better. It equals
+\eqn{-100\,(\mathrm{MSE} + \beta_1^2 + \beta_2^2 +
+\text{stability penalty})}, with \eqn{\mathrm{MSE}} the equal-weight mean of
+the two squared update-equation residuals over lag-1 steps. A non-feasible
+candidate, with non-finite intermediate values, returns the finite fallback
+\eqn{-10^{12}}.
 }
 \description{
-Computes the training objective for a single TF-TG pair.
-It sums the equal-weight mean squared prediction error of the two discrete
-update equations, a penalty on the correction terms, and a discrete-stability
-penalty, then negates and scales the result for maximization-based optimizers
-such as genetic algorithms and gradient ascent.
-Non-feasible individuals return a finite fallback value.
+User-facing objective function for a single TF-TG pair, used as
+the fitness function of the genetic algorithm and as the scoring function
+inside gradient ascent. It ensures a fixed context is available, then
+delegates the numerical evaluation to the hot routine
+\code{\link{f_train_core}}. The objective combines equal-weight prediction
+error, correction-term regularization and a discrete-stability penalty,
+negated and scaled for maximization.
 }
 \details{
-For one TF-TG pair, the function proceeds as follows:
+The wrapper performs only two steps:
 \enumerate{
-\item Names the parameter vector and extracts the individual parameters, and extracts the TFE/TGE group series.
-\item For each lag-1 step, forms the prediction errors of \eqn{f_1} and
-\eqn{f_2}, and averages their squared errors into the MSE.
-\item Adds the correction-term penalty \eqn{\beta_1^2+\beta_2^2}.
-\item Computes the equilibrium level, local gains, Jacobi trace and
-determinant, discriminant and eigenvalues, and the stability penalty
-against the upper-quartile pseudotime step.
-\item Returns \eqn{-100\,(\mathrm{MSE} + \beta_1^2+\beta_2^2 + \text{stability penalty})}.
+\item Builds the context with \code{\link{f_train_context}} when
+\code{ctx} is \code{NULL}; otherwise it reuses the supplied context.
+\item Calls \code{\link{f_train_core}} on \code{params} and returns its
+value unchanged.
 }
+The detailed construction of the MSE, the stability penalty and the
+objective is documented in \code{\link{f_train_core}}.
 }
 \note{
 \itemize{
-\item The value is negated because genetic algorithms maximize, whereas the underlying loss is minimized.
-\item The two residuals are equally weighted; the weights may be adjusted according to measurement precision.
-\item The boundary barrier is currently disabled and retained for testing;
-\code{params_init}, \code{params_upper} and \code{params_lower} do not affect the returned value while it is disabled.
-\item This function is called repeatedly during optimization and is computationally intensive.
-\item Computes the effect efficiency \eqn{R} via \code{\link{R_cal}}.
-\item Computes the Hill saturations \eqn{v_i}, \eqn{v_j} via \code{\link{Hill_cal}} and the net rate \eqn{v_i-v_j},
-and clamps \eqn{v_j} away from the endpoints for \eqn{S}.
-\item Computes the derivative of the unimodal feedback effect magnitude \eqn{S} via \code{\link{S_cal}}.
+\item The objective is negated because the optimizers maximize while the
+underlying loss is minimized.
+\item The boundary barrier is currently disabled, so \code{params_init},
+\code{params_upper} and \code{params_lower} do not affect the result;
+they are kept for future testing.
+\item This function is called many thousands of times during training;
+pass a prebuilt \code{ctx} to avoid repeated context construction.
 }
 }
 \examples{
@@ -102,4 +107,10 @@ obj_value = f_train_cal(
   params_lower = param_lower
 )
 }
+}
+\seealso{
+Internally uses \code{\link{f_train_context}} and
+\code{\link{f_train_core}}. Called by \code{\link{model_train}} as the
+genetic-algorithm fitness. Related gradient helper:
+\code{\link{f_train_cal_gr}}.
 }
