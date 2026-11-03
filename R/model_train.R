@@ -46,7 +46,7 @@
 #' @param maxiter_ga Positive integer. Maximum generations per GA run.
 #' Defaults to 150. Maps to \code{maxiter} in \code{\link[GA]{ga}}.
 #' @param pcrossover_ga Numeric in \[0, 1\]. GA crossover probability.
-#' Defaults to 0.9. Maps to \code{pcrossover} in \code{\link[GA]{ga}}.
+#' Defaults to 0.5. Maps to \code{pcrossover} in \code{\link[GA]{ga}}.
 #' @param pmutation_ga Numeric in \[0, 1\]. GA mutation probability.
 #' Defaults to 0.5. Maps to \code{pmutation} in \code{\link[GA]{ga}}.
 #' @param parallel_ga Logical. Whether each GA run itself evaluates in
@@ -135,7 +135,7 @@
 #'
 #' popSize_ga = 50
 #' maxiter_ga = 150
-#' pcrossover_ga = 0.9
+#' pcrossover_ga = 0.5
 #' pmutation_ga = 0.5
 #' parallel_ga = FALSE
 #' seed_ga = 123 # Reproducible
@@ -178,7 +178,7 @@ model_train = function(
     interest_cell_type_genes_pseudotime_info,
     max_epochs = 1000, early_stop = 10,
     eps_theta = 1e-3, eps_loss = 1e-5,
-    popSize_ga = 50, maxiter_ga = 150, pcrossover_ga = 0.9, pmutation_ga = 0.5,
+    popSize_ga = 50, maxiter_ga = 150, pcrossover_ga = 0.5, pmutation_ga = 0.5,
     parallel_ga = FALSE, seed_ga = 123,
     iterations_grad = 30, ncores_grad = 1,
     ncores = 1

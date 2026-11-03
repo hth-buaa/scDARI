@@ -30,13 +30,17 @@
 #' @param topn_ratio Numeric between 0 and 1. Number of models averaged as a
 #'   proportion of available trained models.
 #' Defaults to 0.1.
-#' @param fix_factor Numeric in (0, 1]. Factor applied to the weights of
+#' @param fix_factor Numeric in (0, 1\]. Factor applied to the weights of
 #'   boundary strengths, with 1 applying no down-weighting.
 #' Defaults to 1.0.
-#' @param min_scale Numeric in (0, 1]. Multiplier on the smallest positive value
+#' @param min_scale Numeric in \[0, 1\]. Multiplier on the smallest positive value
 #'   when setting the min-max lower bound, applied to strength and loss
 #'   normalization.
 #' Defaults to 0.99.
+#' @param max_scale Numeric not less than 1. Multiplier on the biggest positive value
+#'   when setting the min-max lower bound, applied to strength and loss
+#'   normalization.
+#' Defaults to 1.01.
 #' @param each Positive integer. Maximum number of pairs per parallel chunk.
 #' Defaults to 1000000.
 #' @param ncores Positive integer. Number of cores for parallel processing via
@@ -97,6 +101,7 @@ select_best_prediction = function(
     topn_ratio = 0.1,
     fix_factor = 1.0,
     min_scale = 0.99,
+    max_scale = 1.01,
     each = 1000000,
     ncores = 1
 ) {
@@ -124,8 +129,12 @@ select_best_prediction = function(
     base::stop("'fix_factor' must be a single value in (0, 1].")
   }
   if (!(base::is.numeric(min_scale) && base::length(min_scale) == 1 &&
-        min_scale > 0 && min_scale <= 1)) {
-    base::stop("'min_scale' must be a single value in (0, 1].")
+        min_scale >= 0 && min_scale <= 1)) {
+    base::stop("'min_scale' must be a single value in [0, 1].")
+  }
+  if (!(base::is.numeric(max_scale) && base::length(max_scale) == 1 &&
+        max_scale >= 1)) {
+    base::stop("'max_scale' must be a single value not less than 1.")
   }
 
   ### Shared gene expression features, computed once for all cell types.
@@ -179,9 +188,30 @@ select_best_prediction = function(
 
       # Column permutation ordering each row by loss; keep only the top-n.
       # The ordering is the only R-level loop, so parallelize it across rows.
-      topn_order = function(mat) {
-        base::t(base::apply(mat, 1, function(x) base::order(x)[base::seq_len(topn)]))
+
+
+
+
+
+      # topn_order = function(mat) {
+      #   base::t(base::apply(mat, 1, function(x) base::order(x)[base::seq_len(topn)]))
+      # }
+      topn_order <- function(mat) {
+        base::matrix(
+          base::as.vector(base::apply(
+            mat, 1,
+            function(x) base::order(x)[base::seq_len(topn)]
+          )),
+          nrow = base::nrow(mat),
+          ncol = topn,
+          byrow = TRUE
+        )
       }
+
+
+
+
+
       use_parallel = base::is.numeric(ncores) && ncores > 1 &&
         .Platform$OS.type == "unix"
       if (use_parallel) {
@@ -307,7 +337,7 @@ select_best_prediction = function(
                          dimnames = base::dimnames(Mx))
       if (base::any(active)) {
         min_before = col_min[active] * min_scale
-        max_before = col_max[active] + 0.0001
+        max_before = (col_max[active] + 0.0001) * max_scale
         denom = max_before - min_before
         scaled = (Mx[, active, drop = FALSE] - base::matrix(
           min_before, nrow = base::nrow(Mx), ncol = base::sum(active), byrow = TRUE

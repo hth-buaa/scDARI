@@ -15,6 +15,7 @@ select_best_prediction(
   topn_ratio = 0.1,
   fix_factor = 1,
   min_scale = 0.99,
+  max_scale = 1.01,
   each = 1e+06,
   ncores = 1
 )
@@ -52,10 +53,15 @@ Defaults to 0.1.}
 boundary strengths, with 1 applying no down-weighting.
 Defaults to 1.0.}
 
-\item{min_scale}{Numeric in (0, 1]. Multiplier on the smallest positive value
+\item{min_scale}{Numeric in [0, 1]. Multiplier on the smallest positive value
 when setting the min-max lower bound, applied to strength and loss
 normalization.
 Defaults to 0.99.}
+
+\item{max_scale}{Numeric not less than 1. Multiplier on the biggest positive value
+when setting the min-max lower bound, applied to strength and loss
+normalization.
+Defaults to 1.01.}
 
 \item{each}{Positive integer. Maximum number of pairs per parallel chunk.
 Defaults to 1000000.}

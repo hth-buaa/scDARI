@@ -16,7 +16,7 @@ model_train(
   eps_loss = 1e-05,
   popSize_ga = 50,
   maxiter_ga = 150,
-  pcrossover_ga = 0.9,
+  pcrossover_ga = 0.5,
   pmutation_ga = 0.5,
   parallel_ga = FALSE,
   seed_ga = 123,
@@ -76,7 +76,7 @@ Larger populations explore more widely at higher cost. Maps to
 Defaults to 150. Maps to \code{maxiter} in \code{\link[GA]{ga}}.}
 
 \item{pcrossover_ga}{Numeric in [0, 1]. GA crossover probability.
-Defaults to 0.9. Maps to \code{pcrossover} in \code{\link[GA]{ga}}.}
+Defaults to 0.5. Maps to \code{pcrossover} in \code{\link[GA]{ga}}.}
 
 \item{pmutation_ga}{Numeric in [0, 1]. GA mutation probability.
 Defaults to 0.5. Maps to \code{pmutation} in \code{\link[GA]{ga}}.}
@@ -174,7 +174,7 @@ early_stop = 5
 
 popSize_ga = 50
 maxiter_ga = 150
-pcrossover_ga = 0.9
+pcrossover_ga = 0.5
 pmutation_ga = 0.5
 parallel_ga = FALSE
 seed_ga = 123 # Reproducible
