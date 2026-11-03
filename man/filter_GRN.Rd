@@ -6,14 +6,14 @@
 \usage{
 filter_GRN(
   interest_cell_type_pGRN,
-  theta_p_points = base::c(0, 0.5, 1),
-  initial_quantile_points = base::c(1.5, 0.9, 0.6),
-  theta_p_quantile_fit_start = base::list(a = 0.333333, b = 0.333333, c = -0.5),
-  factor_balance = base::list(FG.Loss_norm.R = 0.2, FG.theta_i.R = 0.2, F.NZER.R = 0.2,
+  theta_p_points = c(0, 0.5, 1),
+  initial_quantile_points = c(1.5, 0.9, 0.6),
+  theta_p_quantile_fit_start = list(a = 0.333333, b = 0.333333, c = -0.5),
+  factor_balance = list(FG.Loss_norm.R = 0.2, FG.theta_i.R = 0.2, F.NZER.R = 0.2,
     F.NZEA.R = 0.2, F.EA.R = 0.2, G.NZER.R = 0.2, G.NZEA.R = 0.2, G.EA.R = 0.2),
-  factor_range = base::list(FG.Loss_norm.R = 0.25, FG.theta_i.R = 0.25, F.NZER.R = 0.05,
+  factor_range = list(FG.Loss_norm.R = 0.25, FG.theta_i.R = 0.25, F.NZER.R = 0.05,
     F.NZEA.R = 0.05, F.EA.R = 0.05, G.NZER.R = 0.15, G.NZEA.R = 0.15, G.EA.R = 0.15),
-  factor_attribute = base::list(FG.Loss_norm.R = "penalty", FG.theta_i.R = "relaxation",
+  factor_attribute = list(FG.Loss_norm.R = "penalty", FG.theta_i.R = "relaxation",
     F.NZER.R = "relaxation", F.NZEA.R = "relaxation", F.EA.R = "relaxation", G.NZER.R =
     "relaxation", G.NZEA.R = "relaxation", G.EA.R = "relaxation"),
   rescue_TF = TRUE,
@@ -22,95 +22,101 @@ filter_GRN(
 )
 }
 \arguments{
-\item{interest_cell_type_pGRN}{List. Output of \code{\link{select_best_prediction}}.}
+\item{interest_cell_type_pGRN}{List. Output of
+\code{\link{select_best_prediction}}, named by cell type and containing
+\code{pred_summary}.}
 
-\item{theta_p_points}{Numeric vector.
-Predicted-strength anchor points for fitting the initial threshold curve.
-Defaults to \code{c(0, 0.5, 1)}.}
+\item{theta_p_points}{Numeric vector, default \code{c(0, 0.5, 1)}.
+Predicted-strength anchor points for fitting the initial threshold curve.}
 
-\item{initial_quantile_points}{Numeric vector.
-Initial-threshold anchor values aligned to \code{theta_p_points}.
-Defaults to \code{c(1.5, 0.9, 0.6)}.}
+\item{initial_quantile_points}{Numeric vector, default
+\code{c(1.5, 0.9, 0.6)}. Initial-threshold anchor values aligned
+positionally to \code{theta_p_points}.}
 
-\item{theta_p_quantile_fit_start}{Named list.
-Starting values \code{a}, \code{b}, \code{c} for the nonlinear fit.
-Defaults to \code{list(a = 0.333333, b = 0.333333, c = -0.5)}.}
+\item{theta_p_quantile_fit_start}{Named list, default
+\code{list(a = 0.333333, b = 0.333333, c = -0.5)}. Starting values
+\code{a}, \code{b}, \code{c} for the nonlinear least-squares fit.}
 
-\item{factor_balance}{Named list.
-Center value \code{fb} of each adjustment feature.
-Names must match those of \code{factor_range} and \code{factor_attribute}.}
+\item{factor_balance}{Named list. Center value \code{fb} of each
+adjustment feature. Names must match those of \code{factor_range} and
+\code{factor_attribute}.}
 
-\item{factor_range}{Named list. Strength \code{fr} of each adjustment feature.}
+\item{factor_range}{Named list. Strength \code{fr} of each adjustment
+feature.}
 
-\item{factor_attribute}{Named list. Direction of each feature,
-either \code{"relaxation"} or \code{"penalty"}.}
+\item{factor_attribute}{Named list. Direction of each feature, either
+\code{"relaxation"} or \code{"penalty"}.}
 
-\item{rescue_TF}{Logical. Whether to run the TF rescue step.
-Defaults to TRUE.}
+\item{rescue_TF}{Logical, default \code{TRUE}. Whether to run the TF
+rescue step.}
 
-\item{min_TG_per_TF}{Positive integer.
-Minimum number of targets kept per TF after rescue.
-Defaults to 1.}
+\item{min_TG_per_TF}{Positive integer, default \code{1}. Minimum number
+of targets kept per TF after rescue.}
 
-\item{TF_rescue_quantile_threshold}{Numeric between 0 and 1.
-Pooled low quantile of \code{FG.theta_p_norm.R};
-rescue candidates below it are rejected.
-Defaults to 0.1.}
+\item{TF_rescue_quantile_threshold}{Numeric in \code{[0, 1]}, default
+\code{0.1}. Pooled low quantile of \code{FG.theta_p_norm.R}; rescue
+candidates below it are rejected.}
 }
 \value{
 The input list with the following per cell type:
 \itemize{
-\item \code{pred_summary}:
-the original frame augmented with the initial threshold \code{IT},
-one \code{<feature>-F} column per feature, the adjusted threshold \code{AT},
-and the logical columns \code{filter_keep}, \code{rescue_keep} and \code{keep}.
+\item \code{pred_summary}: the original frame augmented with the initial
+threshold \code{IT}, one \code{<feature>-F} column per feature, the
+adjusted threshold \code{AT}, and the logical columns
+\code{filter_keep}, \code{rescue_keep} and \code{keep}.
 \item \code{pred_summary_loose}: rows with \code{keep = TRUE}.
-\item \code{pred_summary_strict}:
-complete cases of the loose set, obtained with \code{\link[stats]{na.omit}}.
+\item \code{pred_summary_strict}: complete cases of the loose set,
+obtained with \code{\link[stats]{na.omit}}.
 }
 }
 \description{
-Filters inferred GRN results with an adaptive threshold.
-An initial threshold curve decreasing with predicted strength is fitted from anchor points,
-then adjusted per pair by relaxation and penalty factors built from normalized rank features.
-Pairs whose normalized strength rank reaches the adjusted threshold are kept,
-and a TF rescue step ensures each TF retains a minimum number of targets.
-Loose and strict filtered sets are produced.
+Converts the continuous predictions into a final edge set with
+an adaptive threshold rather than one fixed global cutoff. A decreasing
+initial threshold curve is fitted from anchor points, then adjusted per
+pair by relaxation and penalty factors built from normalized rank features.
+Pairs whose normalized strength rank reaches the adjusted threshold are
+kept, and a TF rescue step ensures each TF retains a minimum number of
+targets. Loose and strict filtered sets are produced.
 }
 \details{
-For each cell type, the function proceeds as follows:
+For each cell type the function proceeds as follows.
 \enumerate{
-\item Fits the initial threshold curve \eqn{\mathrm{IT} = 1/(a\,\theta_p + b) + c} from the anchor points,
+\item Fits the initial threshold curve
+\eqn{\mathrm{IT} = 1/(a\,\theta_p + b) + c} from the anchor points
 with \eqn{a > 0}, and evaluates \code{IT} from \code{FG.theta_p}.
-\item For each feature,
-computes its factor as \eqn{1 + f_r(f_b - v)} for relaxation and \eqn{1 + f_r(v - f_b)} for penalty.
-\item Forms the adjusted threshold as the product of \code{IT} and all factors,
-computed on the log scale with non-positive values clamped, and clamps \code{AT} to [0, 1].
-\item Sets \code{filter_keep} when \code{FG.theta_p_norm.R >= AT}.
-\item If rescue is enabled, ranks pairs within each TF by a priority order,
-and rescues top candidates until the TF has \code{min_TG_per_TF} kept targets,
-rejecting candidates below the pooled low quantile.
+\item For each feature, computes its factor as
+\eqn{1 + f_r(f_b - v)} for relaxation and
+\eqn{1 + f_r(v - f_b)} for penalty.
+\item Forms the adjusted threshold as the product of \code{IT} and all
+factors on the log scale, clamps non-positive values, and clamps
+\code{AT} to \code{[0, 1]}.
+\item Sets \code{filter_keep} when
+\code{FG.theta_p_norm.R >= AT}.
+\item If rescue is enabled, ranks pairs within each TF by a priority
+order and rescues top candidates until the TF has
+\code{min_TG_per_TF} kept targets, rejecting candidates below the
+pooled low quantile.
 \item Builds the loose set from \code{keep = filter_keep | rescue_keep},
 and the strict set by removing rows containing missing values.
 }
 }
 \note{
 \itemize{
-\item The function creates and switches to the \code{5 Infer GRN} directory,
-and restores the original working directory on exit.
-\item \code{factor_balance}, \code{factor_range} and \code{factor_attribute} must use identical names.
-\item \code{IT} may exceed 1 for weak predicted strengths;
-after clamping those pairs face \code{AT = 1} and are filtered out.
-\item The loose set is suitable for exploratory network construction,
-and the strict complete-case set for high-confidence downstream analysis.
+\item The function enters the \code{5 Infer GRN} folder and restores the
+original working directory on exit, including on error.
+\item \code{factor_balance}, \code{factor_range} and
+\code{factor_attribute} must use identical names.
+\item \code{IT} may exceed 1 for weak predicted strengths; after
+clamping those pairs face \code{AT = 1} and are filtered out.
 }
 }
 \examples{
 \dontrun{
-interest_cell_type_pGRN = base::readRDS("./5 Infer GRN/interest_cell_type_pGRN.rds")
-interest_cell_type_pGRN = filter_GRN(
-  interest_cell_type_pGRN = interest_cell_type_pGRN
+interest_cell_type_pGRN = readRDS(
+  "./5 Infer GRN/interest_cell_type_pGRN.rds"
 )
-base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
+interest_cell_type_pGRN = filter_GRN(interest_cell_type_pGRN)
+saveRDS(interest_cell_type_pGRN,
+        file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 }
 }

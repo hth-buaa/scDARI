@@ -82,7 +82,7 @@
 #' # ncores = 1 # Windows
 #'
 #' # Way 1: single run, when memory is sufficient.
-#' interest_cell_type_pGRN = infer_GRN_old(
+#' interest_cell_type_pGRN = infer_GRN_old1(
 #'   interest_cell_type_branch_data_for_GRN_infer = interest_cell_type_branch_data_for_GRN_infer,
 #'   interest_cell_type_tau = interest_cell_type_tau,
 #'   interest_cell_type_branch_model_train = interest_cell_type_branch_model_train,
@@ -99,7 +99,7 @@
 #' for (cell_type in base::names(interest_cell_type_branch_data_for_GRN_infer)) {
 #'   interest_cell_type_pGRN[[cell_type]] = base::list()
 #'   for (n in 1:(base::length(interest_cell_type_branch_data_for_GRN_infer[[cell_type]]) - 1)) {
-#'     interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]] = infer_GRN_old(
+#'     interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]] = infer_GRN_old1(
 #'       interest_cell_type_branch_data_for_GRN_infer = interest_cell_type_branch_data_for_GRN_infer,
 #'       interest_cell_type_tau = interest_cell_type_tau,
 #'       interest_cell_type_branch_model_train = interest_cell_type_branch_model_train,
@@ -113,7 +113,7 @@
 #' }
 #' base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 #' }
-infer_GRN_old = function(
+infer_GRN_old1 = function(
     interest_cell_type_branch_data_for_GRN_infer,
     interest_cell_type_tau,
     interest_cell_type_branch_model_train,

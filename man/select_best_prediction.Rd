@@ -2,7 +2,7 @@
 % Please edit documentation in R/select_best_prediction.R
 \name{select_best_prediction}
 \alias{select_best_prediction}
-\title{Select and Aggregate Best GRN Predictions}
+\title{Select the Best Prediction for Each TF-TG}
 \usage{
 select_best_prediction(
   interest_cell_type_pGRN,
@@ -21,107 +21,101 @@ select_best_prediction(
 )
 }
 \arguments{
-\item{interest_cell_type_pGRN}{List. Output of \code{\link{infer_GRN}}.}
+\item{interest_cell_type_pGRN}{List. Output of \code{\link{infer_GRN}},
+named by cell type. Each branch node is either a disk reference or an
+in-memory object holding \code{theta_p} and \code{loss}.}
 
 \item{interest_cell_type_genes_pseudotime_info}{List. Output of
-\code{\link{get_genes_pseudotime_info}}, containing branch cell counts for
-weighted integration.}
+\code{\link{get_genes_pseudotime_info}}. Per cell type, provides
+\code{Branches_TFE} (the number of branches) and \code{Branches_n_cell}
+(the cell count used to weight integration).}
 
-\item{interest_cell_type_iGRN}{List. Output of \code{\link{calculate_iGRN}} or
-\code{\link{filter_iGRN_by_ChIP_Atlas_priors}}, used to retrieve the
-observed regulatory strength \code{theta_i}.}
+\item{interest_cell_type_iGRN}{List. Output of \code{\link{calculate_iGRN}}
+or \code{\link{filter_iGRN_by_ChIP_Atlas_priors}}. Per cell type, the
+observed iGRN matrix (targets as rows, TFs as columns), used to attach
+\code{theta_i}.}
 
-\item{Basic_Info}{List returned by \code{\link{get_expression_matrix}},
-containing the Seurat object \code{scRNAseq_for_GRN} from which gene-level
-expression features are computed.}
+\item{Basic_Info}{List returned by \code{\link{get_expression_matrix}}.
+Contains \code{scRNAseq_for_GRN}, either a Seurat object or a mock list
+with a count matrix, from which gene features are computed.}
 
 \item{interest_cell_type_tau}{Named numeric vector. Output of
-\code{\link{get_cell_type_tau}}, used to shift normalized positive
-strengths above \code{tau}.}
+\code{\link{get_cell_type_tau}}. One tau per cell type, used as the lower
+shift when normalizing strengths within a TF.}
 
-\item{topn_max}{Positive integer. Maximum number of models averaged per pair.
-Defaults to 25.}
+\item{topn_max}{Positive integer, default \code{25}. Upper bound on the
+number of models averaged per pair. Related to \code{topn_min} and
+\code{topn_ratio}, which jointly determine the effective count.}
 
-\item{topn_min}{Positive integer. Minimum number of models averaged per pair.
-Defaults to 5.}
+\item{topn_min}{Positive integer, default \code{5}. Lower bound on the
+number of models averaged per pair.}
 
-\item{topn_ratio}{Numeric between 0 and 1. Number of models averaged as a
-proportion of available trained models.
-Defaults to 0.1.}
+\item{topn_ratio}{Numeric in \code{(0, 1]}, default \code{0.1}. The
+effective count is \code{round(n_model * topn_ratio)}, then clamped to
+\code{[topn_min, topn_max]} and never above the number of models.}
 
-\item{fix_factor}{Numeric in (0, 1]. Factor applied to the weights of
-boundary strengths, with 1 applying no down-weighting.
-Defaults to 1.0.}
+\item{fix_factor}{Numeric in \code{(0, 1]}, default \code{1.0}. Factor
+applied to the weights of boundary strengths (below 0.0101 or above
+0.9899), which reflect the optimization bounds. \code{1} means no
+down-weighting.}
 
-\item{min_scale}{Numeric in [0, 1]. Multiplier on the smallest positive value
-when setting the min-max lower bound, applied to strength and loss
-normalization.
-Defaults to 0.99.}
+\item{min_scale}{Numeric in \code{[0, 1]}, default \code{0.99}. Multiplies
+the smallest positive value when setting the within-TF min-max lower
+bound. Related to \code{max_scale}, which sets the upper bound.}
 
-\item{max_scale}{Numeric not less than 1. Multiplier on the biggest positive value
-when setting the min-max lower bound, applied to strength and loss
-normalization.
-Defaults to 1.01.}
+\item{max_scale}{Numeric \code{>= 1}, default \code{1.01}. Multiplies the
+maximum value (plus a small offset) when setting the upper bound.}
 
-\item{each}{Positive integer. Maximum number of pairs per parallel chunk.
-Defaults to 1000000.}
+\item{each}{Positive integer, default \code{1000000}. Retained for
+interface compatibility; the streaming path is driven by chunk files.}
 
-\item{ncores}{Positive integer. Number of cores for parallel processing via
-\code{\link[parallel]{mclapply}}.
-Defaults to 1; set to 1 on Windows.}
+\item{ncores}{Positive integer, default \code{1}. Retained for interface
+compatibility; chunk reduction is serial to avoid copying large data.}
 }
 \value{
-The input list with a \code{pred_summary} frame per cell type.
+A list named by cell type. Each entry keeps the branch nodes and
+gains \code{pred_summary}, a data frame with one row per pair containing
+the per-branch values, the integrated \code{FG.theta_p} and
+\code{FG.Loss}, their within-TF normalizations and ranks, the observed
+\code{FG.theta_i} and its rank, and the \code{F.*}/\code{G.*} TF/TG
+expression features.
 }
 \description{
-Post-processes inferred GRN results.
-For each candidate pair within a branch, the trained models with the lowest
-prediction loss are selected and their predicted strengths and losses are
-combined by loss-derived weights, with optional down-weighting of boundary
-strengths.
-Branch results are integrated into a cell-type summary by cell-count weighted
-averaging, predicted strengths and losses are normalized within each TF, and
-observed regulatory-strength ranks together with gene expression features
-are attached.
+Collapses the many per-model predictions of each TF-TG pair
+into one strength and one loss, integrates the branch-level results by
+branch cell count, normalizes values within each TF, and attaches the
+observed iGRN strength and the gene expression features. Disk-backed chunk
+files are streamed, reduced and released one at a time, so large inference
+outputs never need to be fully loaded; in-memory branch objects are
+supported as well.
 }
 \details{
-The per-pair "select top-n lowest-loss models and loss-weight them"
-operation is a pure row-wise reduction: the column permutation that orders
-the loss matrix is computed with \code{\link{apply}} (C-level ordering),
-the selected strengths and losses are gathered by linear indexing, and the
-triangular weights and weighted means are computed by matrix algebra. No
-per-pair R loop, per-pair list append, or duplicated chunk frames are built.
+The per-pair "select the top-n lowest-loss models and weight them
+by loss" step is a pure row-wise reduction: the column permutation that
+orders the loss matrix is computed with \code{\link{apply}} (C-level
+ordering), the selected values are gathered by linear indexing, and the
+triangular weights and weighted means use matrix algebra. No per-pair R
+loop or duplicated chunk frame is built. The branch values are then
+integrated by cell counts, normalized within each TF, and augmented with
+the observed strength and gene features.
 }
 \note{
 \itemize{
-\item The function creates and switches to the \code{5 Infer GRN}
-directory, and restores the original working directory on exit.
-\item \code{fix_factor} must be in (0, 1].
-\item Reduce \code{each} if out-of-memory errors occur.
-\item Parallel processing relies on \code{\link[parallel]{mclapply}};
-set \code{ncores = 1} on Windows.
+\item The function enters the \code{5 Infer GRN} folder and restores the
+original working directory on exit, including on error.
+\item Disk chunks are read, reduced and released sequentially, so peak
+memory is bounded by one chunk plus the small aggregated table.
+\item Missing branch values are ignored when computing the weighted means.
 }
 }
 \examples{
 \dontrun{
-interest_cell_type_pGRN = base::readRDS("./5 Infer GRN/interest_cell_type_pGRN.rds")
-interest_cell_type_genes_pseudotime_info = base::readRDS(
-  "./2.2 Data Processing - Cell Grouping/interest_cell_type_genes_pseudotime_info.rds"
-)
-interest_cell_type_iGRN = base::readRDS("./3 get iGRN/interest_cell_type_iGRN.rds")
-Basic_Info = base::readRDS("./1.3 Data Preprocessing - Filter Expression Matrix/Basic_Info.rds")
-interest_cell_type_tau = base::readRDS("./3 get iGRN/interest_cell_type_tau.rds")
-ncores = parallel::detectCores() - 1 # Linux
-# ncores = 1 # Windows
 interest_cell_type_pGRN = select_best_prediction(
   interest_cell_type_pGRN = interest_cell_type_pGRN,
   interest_cell_type_genes_pseudotime_info = interest_cell_type_genes_pseudotime_info,
   interest_cell_type_iGRN = interest_cell_type_iGRN,
   Basic_Info = Basic_Info,
-  interest_cell_type_tau = interest_cell_type_tau,
-  each = 1000,
-  ncores = ncores
+  interest_cell_type_tau = interest_cell_type_tau
 )
-base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 }
 }

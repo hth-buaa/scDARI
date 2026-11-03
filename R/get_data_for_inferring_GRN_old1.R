@@ -64,7 +64,7 @@
 #' ncores = parallel::detectCores() - 1 # Linux
 #' # ncores = 1 # Windows
 #' n_part = ncores
-#' interest_cell_type_branch_data_for_GRN_infer = get_data_for_inferring_GRN_old(
+#' interest_cell_type_branch_data_for_GRN_infer = get_data_for_inferring_GRN_old1(
 #'   interest_cell_type_branch_iGRN = interest_cell_type_branch_iGRN,
 #'   interest_cell_type_group = interest_cell_type_group,
 #'   n_part = n_part,
@@ -75,7 +75,7 @@
 #'   file = "./5 Infer GRN/interest_cell_type_branch_data_for_GRN_infer.rds"
 #' )
 #' }
-get_data_for_inferring_GRN_old = function(
+get_data_for_inferring_GRN_old1 = function(
     interest_cell_type_branch_iGRN,
     interest_cell_type_group,
     n_part = 1,

@@ -15,5 +15,6 @@ utils::globalVariables(base::c(
   "TG_nonzero_freq", "TG_nonzero_mean", "TG_overall_mean",
   "TG_nonzero_freq_quantile", "TG_nonzero_mean_quantile", "TG_overall_mean_quantile",
   "TF_nonzero_freq", "TF_nonzero_mean", "TF_overall_mean",
-  "TF_nonzero_freq_quantile", "TF_nonzero_mean_quantile", "TF_overall_mean_quantile"
+  "TF_nonzero_freq_quantile", "TF_nonzero_mean_quantile", "TF_overall_mean_quantile",
+  "v", ".active", ".cmax"
 ))

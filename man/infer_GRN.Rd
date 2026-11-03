@@ -2,7 +2,7 @@
 % Please edit documentation in R/infer_GRN.R
 \name{infer_GRN}
 \alias{infer_GRN}
-\title{Infer Gene Regulatory Networks with Trained Models}
+\title{Infer the Branch GRN}
 \usage{
 infer_GRN(
   interest_cell_type_branch_data_for_GRN_infer,
@@ -11,135 +11,118 @@ infer_GRN(
   interest_cell_type_group,
   select_cell_type = NULL,
   select_branch = NULL,
-  each = 1e+06,
+  each = 1e+05,
   ncores = 1,
-  save_check_point = TRUE
+  save_check_point = FALSE,
+  keep_in_memory = FALSE,
+  chunk_dir = NULL
 )
 }
 \arguments{
 \item{interest_cell_type_branch_data_for_GRN_infer}{List. Output of
-\code{\link{get_data_for_inferring_GRN}}, containing branch-level pairs
-with group expression features.}
+\code{\link{get_data_for_inferring_GRN}}, named by cell type, with one
+feature table per branch and a global \code{GRN} element.}
 
 \item{interest_cell_type_tau}{Named numeric vector. Output of
-\code{\link{get_cell_type_tau}}, the cell-type-specific binarization
-thresholds.}
+\code{\link{get_cell_type_tau}}. One tau value per cell
+type, used both in the gating function and to bound the optimized
+strength.}
 
-\item{interest_cell_type_branch_model_train}{Nested list. Output of
-\code{\link{model_train}}, containing the trained model details for each
-branch.}
+\item{interest_cell_type_branch_model_train}{List. Output of
+\code{\link{model_train}}. Trained branch models, named by cell type.
+Each branch entry supplies the fitted parameters
+(\code{r2}, \code{alpha1/2}, \code{beta1/2}, \code{s}, \code{u1i/u2i},
+\code{u1j/u2j}, \code{v_tilde}) for every model.}
 
-\item{interest_cell_type_group}{List. Output of \code{\link{cell_grouping}},
-containing pseudotime interval lengths for each branch.}
+\item{interest_cell_type_group}{List. Output of \code{cell_group}; its
+\code{Branches_Tslot_k} elements provide the pseudotime interval lengths
+used in the residual terms.}
 
-\item{select_cell_type}{Character vector or NULL. Cell types to process;
-NULL processes all.
-Defaults to NULL.}
+\item{select_cell_type}{Character vector or \code{NULL}, default
+\code{NULL}. Cell types to process. \code{NULL} means all cell types.}
 
-\item{select_branch}{Numeric vector or NULL. Branch indices to process.
-NULL processes all.
-Defaults to NULL.}
+\item{select_branch}{Integer vector or \code{NULL}, default \code{NULL}.
+Branch indices to process. \code{NULL} means all branches.}
 
-\item{each}{Positive integer. Maximum number of pairs per parallel chunk,
-controlling peak memory.
-Defaults to 1000000.}
+\item{each}{Positive integer, default \code{100000}. Maximum number of
+candidate pairs per chunk, which directly controls peak memory. Smaller
+chunks use less memory but create more files. Related to \code{ncores}:
+size chunks so work is spread evenly across workers.}
 
-\item{ncores}{Positive integer. Number of cores for parallel processing via
-\code{\link[parallel]{mclapply}}.
-Defaults to 1; set to 1 on Windows.}
+\item{ncores}{Positive integer, default \code{1}. Number of workers passed
+to \code{\link[parallel]{mclapply}}; set to \code{1} on Windows.}
 
-\item{save_check_point}{logical. Defaults to \code{TRUE} for saving the
-check point after inferring per branch.}
+\item{save_check_point}{Logical, default \code{FALSE}. Retained for
+interface compatibility; in disk mode every chunk is already persisted.}
+
+\item{keep_in_memory}{Logical, default \code{FALSE}. If \code{FALSE},
+chunks are streamed to disk and the branch node is a reference. If
+\code{TRUE}, all chunk frames are combined and held in memory, which
+reproduces the original behavior but may exhaust memory.}
+
+\item{chunk_dir}{Character or \code{NULL}, default \code{NULL}. Directory
+for chunk files. \code{NULL} resolves to \code{pGRN_chunks} under the
+current working directory; the directory is created and normalized.}
 }
 \value{
-Nested list named \code{interest_cell_type_pGRN}, organized by cell
-type and branch, each branch containing two data frames:
+A list named by cell type. Each branch node is either:
 \itemize{
-\item \code{theta_p}: rows are candidate pairs and columns are trained
-models, values are the optimized regulatory strengths.
-\item \code{loss}: same rows and columns, values are the minimum
-prediction losses at the optimized strengths.
+\item a disk reference containing \code{.storage = "disk"},
+\code{chunk_files}, \code{chunk_nrow}, \code{model_cols},
+\code{n_model} and \code{n_pair}, when \code{keep_in_memory = FALSE};
+or
+\item the in-memory frames \code{theta_p} and \code{loss} (pairs as
+rows, models as columns), when \code{keep_in_memory = TRUE}.
 }
-Each branch result is also saved as an RDS file in the \code{5 Infer GRN}
-directory.
 }
 \description{
-Predicts the optimal regulatory strength and corresponding loss
-for every candidate TF-TG pair using pre-trained scDARI models.
-Processing can be restricted to selected cell types or branches, chunked
-parallel computation is supported, and branch-level results are saved
-automatically.
+Applies every trained model of a branch to each candidate
+TF-TG pair and re-optimizes the regulatory strength for that pair,
+returning the predicted strength and loss under each model. Candidate pairs
+are split into fixed-size chunks; by default every chunk is written to disk
+immediately and reduced to a lightweight file reference, so the large
+pair-by-model matrices never accumulate in memory. An in-memory mode
+reproduces the original all-in-memory behavior for small datasets.
 }
 \details{
-For a fixed pair and model, the prediction loss is a quadratic
-in the effect efficiency \eqn{R}:
+For a fixed pair and model, the prediction loss is a quadratic in
+the effect efficiency \eqn{R}:
 \deqn{\mathrm{MSE}(R) = A R^2 + B R + C,}
-built from the consecutive-group residuals. Its unconstrained minimum is
-\eqn{R^* = -B/(2A)}. Because \eqn{R(\theta)} is a monotonic gating function
-whose shape depends only on \eqn{\tau} and the model's \eqn{r_2}, a single
-monotonic inverse (shared by every pair) maps \eqn{R^*} back to the optimal
-strength \eqn{\theta}. All coefficients are computed with matrix algebra
-over the pairs, so the per-pair Brent optimization is eliminated.
+built from the consecutive-group residuals. The per-pair pipeline is:
+\enumerate{
+\item Extracts the shared feature matrices once, including adjacent-group
+TF/TG features, the pseudotime intervals and the observed saturation
+\code{rho = TFE/(TFE + 0.01)}.
+\item For each model, computes the Hill-saturated TF/TG terms, applies
+the \code{S_cal} transform, and aggregates the per-group residuals
+into row-wise coefficients \code{A}, \code{B}, \code{C}.
+\item Forms the unconstrained minimum \eqn{R^* = -B/(2A)}, handles flat
+and edge cases, maps interior values through the shared monotone
+inverse \code{R_cal} grid, and refines them with three Newton steps.
+\item Converts the strength back through \code{R_cal} and evaluates
+\code{loss = A R R + B R + C}, using multiplication rather than
+exponentiation to preserve bit-identical results.
+}
 }
 \note{
 \itemize{
-\item The function creates and switches to the \code{5 Infer GRN}
-directory, and restores the original working directory on exit.
-\item Reduce \code{each} if out-of-memory errors occur.
-\item Use \code{select_cell_type} and \code{select_branch} to process data
-in batches, which supports interrupted recovery.
-\item Parallel processing relies on \code{\link[parallel]{mclapply}};
-set \code{ncores = 1} on Windows.
+\item Chunk files use \code{qs::qsave} when \pkg{qs} is available and
+fall back to \code{saveRDS} otherwise.
+\item The function enters the \code{5 Infer GRN} folder and restores the
+original working directory on exit, including on error.
+\item Reduce \code{each} if out-of-memory errors occur; use
+\code{select_cell_type} and \code{select_branch} to process in batches.
 }
 }
 \examples{
 \dontrun{
-interest_cell_type_branch_data_for_GRN_infer = base::readRDS(
-  "./5 Infer GRN/interest_cell_type_branch_data_for_GRN_infer.rds"
-)
-interest_cell_type_tau = base::readRDS("./3 get iGRN/interest_cell_type_tau.rds")
-interest_cell_type_branch_model_train = base::readRDS(
-  "./4 Build Prediction Model/interest_cell_type_branch_model_train.rds"
-)
-interest_cell_type_group = base::readRDS(
-  "./2.2 Data Processing - Cell Grouping/interest_cell_type_group.rds"
-)
-each = 1000
-ncores = parallel::detectCores() - 1 # Linux
-# ncores = 1 # Windows
-
-# Way 1: single run, when memory is sufficient.
 interest_cell_type_pGRN = infer_GRN(
   interest_cell_type_branch_data_for_GRN_infer = interest_cell_type_branch_data_for_GRN_infer,
   interest_cell_type_tau = interest_cell_type_tau,
   interest_cell_type_branch_model_train = interest_cell_type_branch_model_train,
   interest_cell_type_group = interest_cell_type_group,
-  select_cell_type = NULL,
-  select_branch = NULL,
-  each = each,
-  ncores = ncores,
-  save_check_point = TRUE
+  each = 100000,
+  ncores = parallel::detectCores() - 1
 )
-base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
-
-# Way 2: branch-by-branch, more stable for large data.
-interest_cell_type_pGRN = base::list()
-for (cell_type in base::names(interest_cell_type_branch_data_for_GRN_infer)) {
-  interest_cell_type_pGRN[[cell_type]] = base::list()
-  for (n in 1:(base::length(interest_cell_type_branch_data_for_GRN_infer[[cell_type]]) - 1)) {
-    interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]] = infer_GRN(
-      interest_cell_type_branch_data_for_GRN_infer = interest_cell_type_branch_data_for_GRN_infer,
-      interest_cell_type_tau = interest_cell_type_tau,
-      interest_cell_type_branch_model_train = interest_cell_type_branch_model_train,
-      interest_cell_type_group = interest_cell_type_group,
-      select_cell_type = cell_type,
-      select_branch = n,
-      each = each,
-      ncores = ncores,
-      save_check_point = TRUE
-    )[[cell_type]][[base::paste0("branch", n)]]
-  }
-}
-base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 }
 }

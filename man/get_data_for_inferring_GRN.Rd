@@ -13,101 +13,91 @@ get_data_for_inferring_GRN(
 }
 \arguments{
 \item{interest_cell_type_branch_iGRN}{List. Output of
-\code{\link{get_branch_iGRN}}, containing branch-specific iGRN matrices
-with target genes as rows and TFs as columns.}
+\code{get_branch_iGRN}, named by cell type. Each cell type holds one iGRN
+matrix per branch with target genes as rows and transcription factors as
+columns; a matrix may be a dense matrix or a \code{sparseMatrix}. Non-zero
+entries define the candidate pairs, and their values supply the observed
+\code{theta_i}.}
 
-\item{interest_cell_type_group}{List. Output of \code{\link{cell_grouping}},
-containing the aggregated TFE/TGE features for each branch.}
+\item{interest_cell_type_group}{List. Output of \code{cell_grouping}, named
+by cell type. The elements \code{Branches_TFE_T} and \code{Branches_TGE_T}
+hold, per branch, the aggregated TF-expression and TG-expression feature
+matrices (genes as rows and pseudotime groups as columns) that are aligned
+to the candidate pairs.}
 
-\item{n_part}{Positive integer. Number of within-branch partitions; used
-only for a single branch (with multiple branches the branch itself is the
-parallel unit).
-Defaults to 1.}
+\item{n_part}{Positive integer, default \code{1}. Number of within-branch
+partitions, used only when a single branch is processed; with several
+branches the branch itself is the parallel unit and this value is ignored.
+The default \code{1} means no splitting. Related to \code{ncores}: each
+partition is dispatched as one parallel worker.}
 
-\item{ncores}{Positive integer. Number of cores for parallel processing via
-\code{\link[parallel]{mclapply}}.
-Defaults to 1; on Windows it is forced to 1 (no forking).}
+\item{ncores}{Positive integer, default \code{1}. Number of workers passed
+to \code{\link[parallel]{mclapply}}. On Windows forking is unavailable, so
+the value is forced to \code{1}. Related to \code{n_part}, which sets how
+many pieces the workers receive.}
 }
 \value{
-Nested list organized by cell type, each entry containing:
+A list named by cell type. Each entry contains:
 \itemize{
-\item \code{branch1}, \code{branch2}, ...: branch data frames with one row
-per non-zero TF-TG pair, including \code{TG}, \code{TF}, \code{theta_i}
-and the group features \code{TFE_K} and \code{TGE_K} for each group K.
-\item \code{GRN}: global de-duplicated pair set across branches, containing
-only \code{TG}, \code{TF} and \code{theta_i}.
+\item \code{branch1}, \code{branch2}, ...: data frames with one row per
+non-zero pair, including \code{TG}, \code{TF}, \code{theta_i} and the
+interleaved group features \code{TFE_K}, \code{TGE_K} for every group K.
+Row names are \code{<TF>_to_<TG>}.
+\item \code{GRN}: the global pair set de-duplicated by \code{(TG, TF)} across
+branches, retaining only \code{TG}, \code{TF} and \code{theta_i}.
 }
-Pairs with \code{theta_i = 0} (or \code{NA}) are removed from both branch
-and global sets.
 }
 \description{
-Builds inference-ready datasets by combining branch-level iGRN
-TF-TG pairs with group expression features from cell grouping.
-Non-zero pairs are located directly from the (often sparse) branch iGRN
-matrices via vectorized indexing, and the TFE/TGE feature binding is fully
-vectorized (C-level matrix operations), eliminating the original row-by-row
-R loops. When several branches are present the independent branches are
-processed in parallel by forking; a single branch uses an optional
-within-branch partition controlled by \code{n_part}. Both branch-level full
-feature sets and a global de-duplicated pair set are returned.
+Expands every non-zero TF-TG pair of the branch-specific iGRN
+matrices and binds the same group-level TFE/TGE features used in model
+training, producing the inference-ready datasets consumed by
+\code{\link{infer_GRN}}. Non-zero pairs are located directly from the
+often-sparse iGRN matrices without dense materialization, and all feature
+binding is vectorized. Both branch-level tables and a global de-duplicated
+pair set are returned.
 }
 \details{
-For each cell type, the function proceeds as follows:
+For each cell type the function runs the following pipeline.
 \enumerate{
-\item Locates non-zero entries of each branch iGRN matrix with
-\code{which(mat != 0)} and converts the linear indices to TG/TF
-positions, yielding the non-zero pairs (with values) in column-major
-order in one vectorized step.
-\item Appends the TFE/TGE group features by vectorized matrix indexing:
-each selected TF's / TG's group-expression row is looked up to match the
-pair order.
-\item With multiple branches, builds the branches in parallel; with a
-single branch, optionally splits it into \code{n_part} partitions.
-\item Binds the non-zero pairs across branches and de-duplicates by the
-pair (TG, TF) to form the global set.
+\item Extracts non-zero entries in column-major order without coercing a
+sparse matrix to dense: \code{Matrix::summary} for sparse matrices and
+\code{which(mat != 0)} for dense matrices, with \code{NA} entries
+discarded.
+\item Builds the branch table by vectorized row lookup, interleaving each
+selected TF's and TG's group features into \code{TFE_K}/\code{TGE_K}.
+\item Schedules the work: parallel across independent branches, or
+optionally partitions one branch into \code{n_part} pieces.
+\item Binds the branch pairs and de-duplicates them by \code{(TG, TF)} to
+form the global \code{GRN}.
 }
-The pairs are generated directly from the row/column names of the branch
-iGRN matrices, so every pair is guaranteed to belong to that branch's
-TF/TG sets; the per-row membership test and row-by-row assignment of the
-original implementation are therefore unnecessary and removed.
 }
 \note{
 \itemize{
-\item The function creates and switches to the \code{5 Infer GRN} directory,
-and restores the original working directory on exit (including on error).
-\item Feature binding is memory-allocation/indexing bound, not CPU bound.
-For a single branch the vectorized serial build is already near optimal
-and within-branch splitting may be slightly slower from fork/recombine
-overhead; for multiple branches the cross-branch parallelism uses the
-independent branches and can speed the work up on a multi-socket server.
-\item Pairs with zero (or \code{NA}) regulatory strength are excluded
-automatically.
-\item The \code{GRN} element gives a global, de-duplicated view without
-group features.
-\item Parallel processing relies on \code{\link[parallel]{mclapply}};
-on Windows \code{ncores} is forced to 1.
+\item The function creates and enters the \code{5 Infer GRN} folder and
+restores the original working directory on exit, including on error.
+\item The work is indexing and memory-allocation bound rather than CPU
+bound; the serial vectorized build is already fast, and splitting a
+single branch can be slightly slower because of fork and recombine
+overhead.
+\item Pairs with zero or \code{NA} strength are excluded automatically.
 }
 }
 \examples{
 \dontrun{
-interest_cell_type_branch_iGRN = base::readRDS(
-  "./3 get iGRN/interest_cell_type_branch_iGRN.rds"
+interest_cell_type_branch_iGRN = qs::qread(
+  "./3 get iGRN/interest_cell_type_branch_iGRN.qsave"
 )
-interest_cell_type_group = base::readRDS(
-  "./2.2 Data Processing - Cell Grouping/interest_cell_type_group.rds"
+interest_cell_type_group = qs::qread(
+  "./2.2 Data Processing - Cell Grouping/interest_cell_type_group.qsave"
 )
-ncores = parallel::detectCores() - 1 # Linux
-# ncores = 1 # Windows
-n_part = ncores
+ncores = parallel::detectCores() - 1
 interest_cell_type_branch_data_for_GRN_infer = get_data_for_inferring_GRN(
   interest_cell_type_branch_iGRN = interest_cell_type_branch_iGRN,
   interest_cell_type_group = interest_cell_type_group,
-  n_part = n_part,
+  n_part = ncores,
   ncores = ncores
 )
-base::saveRDS(
-  interest_cell_type_branch_data_for_GRN_infer,
-  file = "./5 Infer GRN/interest_cell_type_branch_data_for_GRN_infer.rds"
-)
+qs::qsave(interest_cell_type_branch_data_for_GRN_infer,
+          file = "./5 Infer GRN/interest_cell_type_branch_data_for_GRN_infer.qsave")
 }
 }

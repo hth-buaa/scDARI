@@ -1,120 +1,99 @@
-#' @title Infer Gene Regulatory Networks with Trained Models
+#' @title Infer the Branch GRN
 #'
-#' @description Predicts the optimal regulatory strength and corresponding loss
-#' for every candidate TF-TG pair using pre-trained scDARI models.
-#' Processing can be restricted to selected cell types or branches, chunked
-#' parallel computation is supported, and branch-level results are saved
-#' automatically.
+#' @description Applies every trained model of a branch to each candidate
+#' TF-TG pair and re-optimizes the regulatory strength for that pair,
+#' returning the predicted strength and loss under each model. Candidate pairs
+#' are split into fixed-size chunks; by default every chunk is written to disk
+#' immediately and reduced to a lightweight file reference, so the large
+#' pair-by-model matrices never accumulate in memory. An in-memory mode
+#' reproduces the original all-in-memory behavior for small datasets.
 #'
 #' @param interest_cell_type_branch_data_for_GRN_infer List. Output of
-#'   \code{\link{get_data_for_inferring_GRN}}, containing branch-level pairs
-#'   with group expression features.
+#'   \code{\link{get_data_for_inferring_GRN}}, named by cell type, with one
+#'   feature table per branch and a global \code{GRN} element.
 #' @param interest_cell_type_tau Named numeric vector. Output of
-#'   \code{\link{get_cell_type_tau}}, the cell-type-specific binarization
-#'   thresholds.
-#' @param interest_cell_type_branch_model_train Nested list. Output of
-#'   \code{\link{model_train}}, containing the trained model details for each
-#'   branch.
-#' @param interest_cell_type_group List. Output of \code{\link{cell_grouping}},
-#'   containing pseudotime interval lengths for each branch.
-#' @param select_cell_type Character vector or NULL. Cell types to process;
-#' NULL processes all.
-#' Defaults to NULL.
-#' @param select_branch Numeric vector or NULL. Branch indices to process.
-#' NULL processes all.
-#' Defaults to NULL.
-#' @param each Positive integer. Maximum number of pairs per parallel chunk,
-#' controlling peak memory.
-#' Defaults to 1000000.
-#' @param ncores Positive integer. Number of cores for parallel processing via
-#'   \code{\link[parallel]{mclapply}}.
-#' Defaults to 1; set to 1 on Windows.
-#' @param save_check_point logical. Defaults to \code{TRUE} for saving the
-#'   check point after inferring per branch.
+#'   \code{\link{get_cell_type_tau}}. One tau value per cell
+#'   type, used both in the gating function and to bound the optimized
+#'   strength.
+#' @param interest_cell_type_branch_model_train List. Output of
+#'   \code{\link{model_train}}. Trained branch models, named by cell type.
+#'   Each branch entry supplies the fitted parameters
+#'   (\code{r2}, \code{alpha1/2}, \code{beta1/2}, \code{s}, \code{u1i/u2i},
+#'   \code{u1j/u2j}, \code{v_tilde}) for every model.
+#' @param interest_cell_type_group List. Output of \code{cell_group}; its
+#'   \code{Branches_Tslot_k} elements provide the pseudotime interval lengths
+#'   used in the residual terms.
+#' @param select_cell_type Character vector or \code{NULL}, default
+#'   \code{NULL}. Cell types to process. \code{NULL} means all cell types.
+#' @param select_branch Integer vector or \code{NULL}, default \code{NULL}.
+#'   Branch indices to process. \code{NULL} means all branches.
+#' @param each Positive integer, default \code{100000}. Maximum number of
+#'   candidate pairs per chunk, which directly controls peak memory. Smaller
+#'   chunks use less memory but create more files. Related to \code{ncores}:
+#'   size chunks so work is spread evenly across workers.
+#' @param ncores Positive integer, default \code{1}. Number of workers passed
+#'   to \code{\link[parallel]{mclapply}}; set to \code{1} on Windows.
+#' @param save_check_point Logical, default \code{FALSE}. Retained for
+#'   interface compatibility; in disk mode every chunk is already persisted.
+#' @param keep_in_memory Logical, default \code{FALSE}. If \code{FALSE},
+#'   chunks are streamed to disk and the branch node is a reference. If
+#'   \code{TRUE}, all chunk frames are combined and held in memory, which
+#'   reproduces the original behavior but may exhaust memory.
+#' @param chunk_dir Character or \code{NULL}, default \code{NULL}. Directory
+#'   for chunk files. \code{NULL} resolves to \code{pGRN_chunks} under the
+#'   current working directory; the directory is created and normalized.
 #'
-#' @return Nested list named \code{interest_cell_type_pGRN}, organized by cell
-#' type and branch, each branch containing two data frames:
+#' @return A list named by cell type. Each branch node is either:
 #' \itemize{
-#'   \item \code{theta_p}: rows are candidate pairs and columns are trained
-#'     models, values are the optimized regulatory strengths.
-#'   \item \code{loss}: same rows and columns, values are the minimum
-#'     prediction losses at the optimized strengths.
+#'   \item a disk reference containing \code{.storage = "disk"},
+#'     \code{chunk_files}, \code{chunk_nrow}, \code{model_cols},
+#'     \code{n_model} and \code{n_pair}, when \code{keep_in_memory = FALSE};
+#'     or
+#'   \item the in-memory frames \code{theta_p} and \code{loss} (pairs as
+#'     rows, models as columns), when \code{keep_in_memory = TRUE}.
 #' }
-#' Each branch result is also saved as an RDS file in the \code{5 Infer GRN}
-#' directory.
 #'
-#' @details For a fixed pair and model, the prediction loss is a quadratic
-#' in the effect efficiency \eqn{R}:
+#' @details For a fixed pair and model, the prediction loss is a quadratic in
+#' the effect efficiency \eqn{R}:
 #' \deqn{\mathrm{MSE}(R) = A R^2 + B R + C,}
-#' built from the consecutive-group residuals. Its unconstrained minimum is
-#' \eqn{R^* = -B/(2A)}. Because \eqn{R(\theta)} is a monotonic gating function
-#' whose shape depends only on \eqn{\tau} and the model's \eqn{r_2}, a single
-#' monotonic inverse (shared by every pair) maps \eqn{R^*} back to the optimal
-#' strength \eqn{\theta}. All coefficients are computed with matrix algebra
-#' over the pairs, so the per-pair Brent optimization is eliminated.
+#' built from the consecutive-group residuals. The per-pair pipeline is:
+#' \enumerate{
+#'   \item Extracts the shared feature matrices once, including adjacent-group
+#'     TF/TG features, the pseudotime intervals and the observed saturation
+#'     \code{rho = TFE/(TFE + 0.01)}.
+#'   \item For each model, computes the Hill-saturated TF/TG terms, applies
+#'     the \code{S_cal} transform, and aggregates the per-group residuals
+#'     into row-wise coefficients \code{A}, \code{B}, \code{C}.
+#'   \item Forms the unconstrained minimum \eqn{R^* = -B/(2A)}, handles flat
+#'     and edge cases, maps interior values through the shared monotone
+#'     inverse \code{R_cal} grid, and refines them with three Newton steps.
+#'   \item Converts the strength back through \code{R_cal} and evaluates
+#'     \code{loss = A R R + B R + C}, using multiplication rather than
+#'     exponentiation to preserve bit-identical results.
+#' }
 #'
 #' @note
 #' \itemize{
-#'   \item The function creates and switches to the \code{5 Infer GRN}
-#'     directory, and restores the original working directory on exit.
-#'   \item Reduce \code{each} if out-of-memory errors occur.
-#'   \item Use \code{select_cell_type} and \code{select_branch} to process data
-#'     in batches, which supports interrupted recovery.
-#'   \item Parallel processing relies on \code{\link[parallel]{mclapply}};
-#'     set \code{ncores = 1} on Windows.
+#'   \item Chunk files use \code{qs::qsave} when \pkg{qs} is available and
+#'     fall back to \code{saveRDS} otherwise.
+#'   \item The function enters the \code{5 Infer GRN} folder and restores the
+#'     original working directory on exit, including on error.
+#'   \item Reduce \code{each} if out-of-memory errors occur; use
+#'     \code{select_cell_type} and \code{select_branch} to process in batches.
 #' }
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' interest_cell_type_branch_data_for_GRN_infer = base::readRDS(
-#'   "./5 Infer GRN/interest_cell_type_branch_data_for_GRN_infer.rds"
-#' )
-#' interest_cell_type_tau = base::readRDS("./3 get iGRN/interest_cell_type_tau.rds")
-#' interest_cell_type_branch_model_train = base::readRDS(
-#'   "./4 Build Prediction Model/interest_cell_type_branch_model_train.rds"
-#' )
-#' interest_cell_type_group = base::readRDS(
-#'   "./2.2 Data Processing - Cell Grouping/interest_cell_type_group.rds"
-#' )
-#' each = 1000
-#' ncores = parallel::detectCores() - 1 # Linux
-#' # ncores = 1 # Windows
-#'
-#' # Way 1: single run, when memory is sufficient.
 #' interest_cell_type_pGRN = infer_GRN(
 #'   interest_cell_type_branch_data_for_GRN_infer = interest_cell_type_branch_data_for_GRN_infer,
 #'   interest_cell_type_tau = interest_cell_type_tau,
 #'   interest_cell_type_branch_model_train = interest_cell_type_branch_model_train,
 #'   interest_cell_type_group = interest_cell_type_group,
-#'   select_cell_type = NULL,
-#'   select_branch = NULL,
-#'   each = each,
-#'   ncores = ncores,
-#'   save_check_point = TRUE
+#'   each = 100000,
+#'   ncores = parallel::detectCores() - 1
 #' )
-#' base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
-#'
-#' # Way 2: branch-by-branch, more stable for large data.
-#' interest_cell_type_pGRN = base::list()
-#' for (cell_type in base::names(interest_cell_type_branch_data_for_GRN_infer)) {
-#'   interest_cell_type_pGRN[[cell_type]] = base::list()
-#'   for (n in 1:(base::length(interest_cell_type_branch_data_for_GRN_infer[[cell_type]]) - 1)) {
-#'     interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]] = infer_GRN(
-#'       interest_cell_type_branch_data_for_GRN_infer = interest_cell_type_branch_data_for_GRN_infer,
-#'       interest_cell_type_tau = interest_cell_type_tau,
-#'       interest_cell_type_branch_model_train = interest_cell_type_branch_model_train,
-#'       interest_cell_type_group = interest_cell_type_group,
-#'       select_cell_type = cell_type,
-#'       select_branch = n,
-#'       each = each,
-#'       ncores = ncores,
-#'       save_check_point = TRUE
-#'     )[[cell_type]][[base::paste0("branch", n)]]
-#'   }
-#' }
-#' base::saveRDS(interest_cell_type_pGRN, file = "./5 Infer GRN/interest_cell_type_pGRN.rds")
 #' }
 infer_GRN = function(
     interest_cell_type_branch_data_for_GRN_infer,
@@ -123,225 +102,197 @@ infer_GRN = function(
     interest_cell_type_group,
     select_cell_type = NULL,
     select_branch = NULL,
-    each = 1000000,
+    each = 100000,
     ncores = 1,
-    save_check_point = TRUE
+    save_check_point = FALSE,
+    keep_in_memory = FALSE,
+    chunk_dir = NULL
 ) {
-  ### Start.
-  t_start = base::Sys.time()
-  message("Run: Inferring GRN. Time: ", t_start, ".")
-  original_dir = base::getwd()
-  new_folder = "5 Infer GRN"
-  if (!base::dir.exists(new_folder)) {
-    base::dir.create(new_folder, recursive = TRUE)
-    message("Folder created: ", new_folder, ".")
-  } else {
-    message("Folder already exists: ", new_folder, ".")
-  }
-  base::setwd(new_folder)
-  # Restore the original working directory even if the function is interrupted.
-  base::on.exit(base::setwd(original_dir), add = TRUE)
-  message("The current working directory has been switched to: ", base::getwd(), ".")
+  t_start = Sys.time()
+  message("Run: Inferring branch GRN. Time: ", t_start, ".")
 
-  # Vectorized Hill saturation preserving matrix dimensions. The exported
-  # Hill_cal coerces its input with as.numeric, which flattens a matrix; this
-  # wrapper keeps the (pairs x terms) shape. Mathematically identical.
+  original_dir = getwd()
+  new_folder = "5 Infer GRN"
+  if (!dir.exists(new_folder)) dir.create(new_folder, recursive = TRUE)
+  setwd(new_folder)
+  on.exit(setwd(original_dir), add = TRUE)
+
+  ### Chunk writer with an rds fallback
+
+  .write_qs = function(x, file_base) {
+    if (requireNamespace("qs", quietly = TRUE)) {
+      f = file_base
+      qs::qsave(x, file = f)
+    } else {
+      f = paste0(file_base, ".rds")
+      saveRDS(x, file = f)
+    }
+    f
+  }
+
+  # Absolute root directory for chunk files, immune to later setwd calls.
+  if (is.null(chunk_dir)) chunk_dir = file.path(getwd(), "pGRN_chunks")
+  if (!dir.exists(chunk_dir)) dir.create(chunk_dir, recursive = TRUE)
+  chunk_dir = normalizePath(chunk_dir, mustWork = TRUE)
+
+  ### Shape-preserving Hill saturation
+
+  # Keep the matrix shape instead of flattening it with as.numeric.
   Hill_sat = function(x, K, n) {
-    base::storage.mode(x) = "double"
+    storage.mode(x) = "double"
     xn = x^n
     xn / (K + xn)
   }
 
-  interest_cell_type_pGRN = base::list()
-  if (base::is.null(select_cell_type)) {
-    range_cell_type = base::names(interest_cell_type_branch_data_for_GRN_infer)
-  } else {
-    range_cell_type = select_cell_type
-  }
+  interest_cell_type_pGRN = list()
+  range_cell_type = if (is.null(select_cell_type))
+    names(interest_cell_type_branch_data_for_GRN_infer) else select_cell_type
 
   for (cell_type in range_cell_type) {
-    interest_cell_type_pGRN[[cell_type]] = base::list()
-    tau = base::as.numeric(interest_cell_type_tau[cell_type])
-    if (base::is.null(select_branch)) {
-      range_branch = base::seq_len(
-        base::length(interest_cell_type_branch_data_for_GRN_infer[[cell_type]]) - 1)
-    } else {
-      range_branch = select_branch
-    }
+    interest_cell_type_pGRN[[cell_type]] = list()
+    tau = as.numeric(interest_cell_type_tau[cell_type])
+    range_branch = if (is.null(select_branch))
+      seq_len(length(interest_cell_type_branch_data_for_GRN_infer[[cell_type]]) - 1) else
+        select_branch
+
+    # File-name-safe cell type tag.
+    ct_tag = gsub("[^A-Za-z0-9]", "_", cell_type)
 
     for (n in range_branch) {
       message("Process branch ", n, " in cell type ", cell_type, ".")
-      state_data = interest_cell_type_branch_data_for_GRN_infer[[cell_type]][[base::paste0("branch", n)]]
-      re_pred = base::rownames(state_data)
-      N_pred_all = base::length(re_pred)
+      state_data = interest_cell_type_branch_data_for_GRN_infer[[cell_type]][[
+        paste0("branch", n)]]
+      re_pred = rownames(state_data)
+      N_pred_all = length(re_pred)
       message(N_pred_all, " candidate pairs will be predicted.")
 
-      branch_models = interest_cell_type_branch_model_train[[cell_type]][[base::paste0("branch", n)]]
-      re_train = base::sort(base::names(branch_models))
-      n_model_all = base::length(re_train)
-      # Output columns keep unique names; if duplicate model names exist, the
-      # original data.frame(matrix()) makes them unique ("a","a.1") and then
-      # drops the ".1" columns, while per-name assignment makes the last
-      # duplicate win. Replicate that: unique columns, later duplicates win.
-      re_train_cols = base::unique(re_train)
-      n_model = base::length(re_train_cols)
+      branch_models = interest_cell_type_branch_model_train[[cell_type]][[
+        paste0("branch", n)]]
+      re_train = sort(names(branch_models))
+      re_train_cols = unique(re_train)
+      n_model = length(re_train_cols)
+      n_model_all = length(re_train)
       message(n_model_all, " trained models will be applied.")
 
-      # Shared feature columns and interval lengths for the branch.
-      TFE_col = base::grep("TFE_", base::colnames(state_data), value = TRUE)
-      TGE_col = base::grep("TGE_", base::colnames(state_data), value = TRUE)
-      n_group = base::length(TFE_col)
-      Tslot_K = base::as.numeric(
-        interest_cell_type_group[[cell_type]][["Branches_Tslot_k"]][[n]]
-      )
-      # The MSE uses transitions between consecutive groups: K_1 = 1..(n_group-1).
-      term_idx = base::seq_len(n_group - 1)
+      ### Shared feature matrices, extracted once
+
+      TFE_col = grep("TFE_", colnames(state_data), value = TRUE)
+      TGE_col = grep("TGE_", colnames(state_data), value = TRUE)
+      n_group = length(TFE_col)
+      Tslot_K = as.numeric(
+        interest_cell_type_group[[cell_type]][["Branches_Tslot_k"]][[n]])
+      term_idx = seq_len(n_group - 1)
       Tslot_term = Tslot_K[term_idx]
 
-      # Extract the branch feature matrices once (rows = candidate pairs).
-      TFE_mat = base::as.matrix(state_data[, TFE_col, drop = FALSE])
-      TGE_mat = base::as.matrix(state_data[, TGE_col, drop = FALSE])
-      storage.mode(TFE_mat) = "double"
-      storage.mode(TGE_mat) = "double"
+      TFE_mat = as.matrix(state_data[, TFE_col, drop = FALSE])
+      TGE_mat = as.matrix(state_data[, TGE_col, drop = FALSE])
+      storage.mode(TFE_mat) = "double"; storage.mode(TGE_mat) = "double"
       TFE_k = TFE_mat[, term_idx, drop = FALSE]
       TFE_next = TFE_mat[, term_idx + 1L, drop = FALSE]
       TGE_k = TGE_mat[, term_idx, drop = FALSE]
       TGE_next = TGE_mat[, term_idx + 1L, drop = FALSE]
-      # The boundary factor rho depends only on the pair, not on the model.
       rho_mat = TFE_k / (TFE_k + 0.01)
 
-      # Per-model scalars and the shared monotonic inverse lookup table.
-      # R(theta) depends only on tau (fixed here) and the model's r2, so the
-      # theta -> R mapping is shared by every candidate pair.
-      model_meta = stats::setNames(base::lapply(re_train, function(re_tr) {
+      ### Scalar parameters and the shared monotone inverse per model
+
+      model_meta = stats::setNames(lapply(re_train, function(re_tr) {
         pa_best = branch_models[[re_tr]][["best_params"]]
-        getp = function(nm) base::as.numeric(pa_best[nm])
+        getp = function(nm) as.numeric(pa_best[nm])
         r2 = getp("r2")
-        theta_grid = base::seq(0.01, 0.99, length.out = 2000)
-        R_grid = R_cal(
-          theta_TF_TG = theta_grid, tau = tau, r1 = 200, r2 = r2,
-          r3 = 1, r4 = 1000, r5 = 1
-        )
-        base::list(
-          r2 = r2,
-          a1 = getp("alpha1"), a2 = getp("alpha2"),
-          b1 = getp("beta1"), b2 = getp("beta2"),
-          s = getp("s"),
-          u1i = getp("u1i"), u2i = getp("u2i"),
-          u1j = getp("u1j"), u2j = getp("u2j"),
-          v_tilde = getp("v_tilde"),
-          R_lo = R_grid[1], R_hi = R_grid[base::length(R_grid)],
-          theta_grid = theta_grid, R_grid = R_grid
-        )
+        theta_grid = seq(0.01, 0.99, length.out = 2000)
+        R_grid = scDARI::R_cal(theta_grid, tau = tau, r1 = 200, r2 = r2,
+                               r3 = 1, r4 = 1000, r5 = 1)
+        list(r2 = r2,
+             a1 = getp("alpha1"), a2 = getp("alpha2"),
+             b1 = getp("beta1"), b2 = getp("beta2"),
+             s = getp("s"),
+             u1i = getp("u1i"), u2i = getp("u2i"),
+             u1j = getp("u1j"), u2j = getp("u2j"),
+             v_tilde = getp("v_tilde"),
+             R_lo = R_grid[1], R_hi = R_grid[length(R_grid)],
+             theta_grid = theta_grid, R_grid = R_grid)
       }), re_train)
 
-      # Split candidate pairs into chunks of at most `each`.
-      each = base::as.integer(each)
-      if (!(base::is.finite(each) && each > 0)) {
-        base::stop("'each' must be a positive integer.")
-      }
-      n_part = base::ceiling(N_pred_all / each)
-      chunk_idx = base::seq_len(n_part)
-      chunk_bounds = base::lapply(chunk_idx, function(s) {
+      each = as.integer(each)
+      if (!(is.finite(each) && each > 0)) stop("'each' must be positive.")
+      n_part = ceiling(N_pred_all / each)
+      chunk_bounds = lapply(seq_len(n_part), function(s) {
         lo = each * (s - 1) + 1L
-        hi = base::min(each * s, N_pred_all)
-        base::seq.int(lo, hi)
+        hi = min(each * s, N_pred_all)
+        seq.int(lo, hi)
       })
 
-      # Process one chunk of candidate pairs. All algebra is vectorized over
-      # the pairs in the chunk; the loop runs only over the trained models.
+      ### Full computation for one chunk, identical to the original math
+
       process_chunk = function(rows) {
-        n_rows = base::length(rows)
-        theta_out = base::matrix(NA_real_, nrow = n_rows, ncol = n_model)
-        loss_out = base::matrix(NA_real_, nrow = n_rows, ncol = n_model)
-        # Column that each sorted model writes to (duplicates share one column).
-        col_for_model = base::match(re_train, re_train_cols)
+        n_rows = length(rows)
+        theta_out = matrix(NA_real_, n_rows, n_model)
+        loss_out = matrix(NA_real_, n_rows, n_model)
+        col_for_model = match(re_train, re_train_cols)
 
         TFE_k_c = TFE_k[rows, , drop = FALSE]
         TFE_next_c = TFE_next[rows, , drop = FALSE]
         TGE_k_c = TGE_k[rows, , drop = FALSE]
         TGE_next_c = TGE_next[rows, , drop = FALSE]
         rho_c = rho_mat[rows, , drop = FALSE]
-        # Interval lengths replicated per row; multiplying a matrix by a bare
-        # length-8 vector would recycle down columns, so build an explicit frame.
-        Tslot_c = base::matrix(
-          Tslot_term, nrow = n_rows, ncol = base::length(Tslot_term), byrow = TRUE
-        )
+        Tslot_c = matrix(Tslot_term, n_rows, length(Tslot_term), byrow = TRUE)
 
-        for (j in base::seq_len(n_model_all)) {
+        for (j in seq_len(n_model_all)) {
           meta = model_meta[[j]]
           out_col = col_for_model[j]
 
-          # Theta-independent saturations and feedback strength.
           vi = Hill_sat(TFE_k_c, meta$u1i, meta$u2i)
           vj = Hill_sat(TGE_k_c, meta$u1j, meta$u2j)
           vij = vi - vj
-          vj_safe = base::pmin(base::pmax(vj, 1e-12), 1 - 1e-12)
-          S_mat = S_cal(s = meta$s, v = vj_safe, v_tilde = meta$v_tilde)
+          vj_safe = pmin(pmax(vj, 1e-12), 1 - 1e-12)
+          S_mat = scDARI::S_cal(s = meta$s, v = vj_safe, v_tilde = meta$v_tilde)
 
-          # Residuals decomposed as c + R * d for each consecutive group.
           c1 = TGE_k_c + meta$b1 - TGE_next_c
           d1 = meta$a1 * vij * Tslot_c
           c2 = TFE_k_c + meta$b2 - TFE_next_c
           d2 = rho_c * meta$a2 * S_mat * Tslot_c
 
-          # Quadratic coefficients of the MSE in R.
-          A = base::rowMeans(d1 * d1 + d2 * d2)
-          B = base::rowMeans(2 * (c1 * d1 + c2 * d2))
-          C = base::rowMeans(c1 * c1 + c2 * c2)
+          A = rowMeans(d1 * d1 + d2 * d2)
+          B = rowMeans(2 * (c1 * d1 + c2 * d2))
+          C = rowMeans(c1 * c1 + c2 * c2)
 
-          R_lo = meta$R_lo
-          R_hi = meta$R_hi
-          par0 = base::min(base::max(tau, 0.01 + 1e-6), 0.99 - 1e-6)
-          R_par0 = R_cal(
-            theta_TF_TG = par0, tau = tau, r1 = 200, r2 = meta$r2,
-            r3 = 1, r4 = 1000, r5 = 1
-          )
+          R_lo = meta$R_lo; R_hi = meta$R_hi
+          par0 = min(max(tau, 0.01 + 1e-6), 0.99 - 1e-6)
+          R_par0 = scDARI::R_cal(par0, tau = tau, r1 = 200, r2 = meta$r2,
+                                 r3 = 1, r4 = 1000, r5 = 1)
 
-          # Degenerate (flat-in-R) cases.
           flatA = A < 1e-12
-          flatAB = flatA & base::abs(B) < 1e-12
-          # Unconstrained minimizer R* = -B/(2A), guarded against zero A.
-          R_star = -B / (2 * base::pmax(A, 1e-12))
-          R_clamped = base::pmin(base::pmax(R_star, R_lo), R_hi)
-          # Flat A but non-flat B: monotonic loss -> the sign of B picks the edge.
+          flatAB = flatA & abs(B) < 1e-12
+          R_star = -B / (2 * pmax(A, 1e-12))
+          R_clamped = pmin(pmax(R_star, R_lo), R_hi)
           edge_lo = flatA & B > 0
           edge_hi = flatA & B < 0
           R_clamped[edge_lo] = R_lo
           R_clamped[edge_hi] = R_hi
-          # Fully flat: replicate the original Brent behaviour (start point).
           R_clamped[flatAB] = R_par0
 
-          # Map R back to theta. Interior rows use the shared monotonic inverse
-          # (approx for a close start, then vectorized Newton refinement).
           at_lo = R_clamped <= R_lo
           at_hi = R_clamped >= R_hi
           interior = !(at_lo | at_hi | flatAB)
-          theta = base::rep(par0, n_rows)
-          if (base::any(interior)) {
+          theta = rep(par0, n_rows)
+          if (any(interior)) {
             R_t = R_clamped[interior]
-            th = stats::approx(
-              x = meta$R_grid, y = meta$theta_grid, xout = R_t,
-              rule = 2, ties = "ordered"
-            )$y
+            th = stats::approx(meta$R_grid, meta$theta_grid, xout = R_t,
+                               rule = 2, ties = "ordered")$y
             h = 1e-6
             for (it in 1:3) {
-              th_plus = base::pmin(th + h, 0.99)
-              th_minus = base::pmax(th - h, 0.01)
-              Rn = R_cal(
-                theta_TF_TG = th, tau = tau, r1 = 200, r2 = meta$r2,
-                r3 = 1, r4 = 1000, r5 = 1
-              )
-              Rp = (R_cal(
-                theta_TF_TG = th_plus, tau = tau, r1 = 200, r2 = meta$r2,
-                r3 = 1, r4 = 1000, r5 = 1
-              ) - R_cal(
-                theta_TF_TG = th_minus, tau = tau, r1 = 200, r2 = meta$r2,
-                r3 = 1, r4 = 1000, r5 = 1
-              )) / (th_plus - th_minus)
-              Rp = base::pmax(Rp, 1e-12)
+              th_plus = pmin(th + h, 0.99)
+              th_minus = pmax(th - h, 0.01)
+              Rn = scDARI::R_cal(th, tau = tau, r1 = 200, r2 = meta$r2,
+                                 r3 = 1, r4 = 1000, r5 = 1)
+              Rp = (scDARI::R_cal(th_plus, tau = tau, r1 = 200, r2 = meta$r2,
+                                  r3 = 1, r4 = 1000, r5 = 1) -
+                      scDARI::R_cal(th_minus, tau = tau, r1 = 200, r2 = meta$r2,
+                                    r3 = 1, r4 = 1000, r5 = 1)) /
+                (th_plus - th_minus)
+              Rp = pmax(Rp, 1e-12)
               th = th - (Rn - R_t) / Rp
-              th = base::pmin(base::pmax(th, 0.01), 0.99)
+              th = pmin(pmax(th, 0.01), 0.99)
             }
             theta[interior] = th
           }
@@ -349,84 +300,92 @@ infer_GRN = function(
           theta[at_hi] = 0.99
           theta[flatAB] = par0
 
-          # Final R and the minimum loss evaluated at the optimum.
-          R_final = R_cal(
-            theta_TF_TG = theta, tau = tau, r1 = 200, r2 = meta$r2,
-            r3 = 1, r4 = 1000, r5 = 1
-          )
+          R_final = scDARI::R_cal(theta, tau = tau, r1 = 200, r2 = meta$r2,
+                                  r3 = 1, r4 = 1000, r5 = 1)
+
+          # Use R * R rather than R^2: mathematically equal but avoiding a
+          # possible one-ULP floating-point difference from exponentiation.
           loss = A * R_final * R_final + B * R_final + C
 
           theta_out[, out_col] = theta
           loss_out[, out_col] = loss
         }
 
-        theta_df = base::as.data.frame(theta_out)
-        loss_df = base::as.data.frame(loss_out)
-        base::names(theta_df) = re_train_cols
-        base::names(loss_df) = re_train_cols
-        base::rownames(theta_df) = re_pred[rows]
-        base::rownames(loss_df) = re_pred[rows]
-        base::list(theta_p = theta_df, loss = loss_df)
+        theta_df = as.data.frame(theta_out)
+        loss_df = as.data.frame(loss_out)
+        names(theta_df) = re_train_cols
+        names(loss_df) = re_train_cols
+        rownames(theta_df) = re_pred[rows]
+        rownames(loss_df) = re_pred[rows]
+        list(theta_p = theta_df, loss = loss_df)
       }
 
-      # Evaluate chunks in parallel (fork). On a single core, run serially.
-      ncores = base::as.integer(ncores)
-      if (!(base::is.finite(ncores) && ncores > 0)) {
-        base::stop("'ncores' must be a positive integer.")
-      }
-      if (ncores > 1 && n_part > 1) {
-        prediction_list = parallel::mclapply(
-          X = chunk_bounds,
-          FUN = process_chunk,
-          mc.cores = base::min(ncores, n_part)
-        )
-      } else {
-        prediction_list = base::lapply(chunk_bounds, process_chunk)
-      }
+      ncores = as.integer(ncores)
+      if (!(is.finite(ncores) && ncores > 0))
+        stop("'ncores' must be a positive integer.")
 
-      # Validate every chunk result so a failed fork cannot silently drop pairs.
-      if (base::length(prediction_list) != n_part) {
-        base::stop("Expected ", n_part, " chunk results but got ",
-                   base::length(prediction_list), "; reduce 'ncores' or 'each'.")
-      }
-      for (s in chunk_idx) {
-        x = prediction_list[[s]]
-        if (!base::is.list(x) ||
-            !base::all(c("theta_p", "loss") %in% base::names(x)) ||
-            !base::is.data.frame(x[["theta_p"]]) ||
-            !base::is.data.frame(x[["loss"]]) ||
-            base::nrow(x[["theta_p"]]) != base::length(chunk_bounds[[s]])) {
-          base::stop("Chunk ", s, " returned an invalid result; ",
-                     "reduce 'ncores' or 'each' and retry.")
+      if (keep_in_memory) {
+
+        ### Compatibility path: full in-memory rbind, the original behavior
+
+        if (ncores > 1 && n_part > 1) {
+          prediction_list = parallel::mclapply(chunk_bounds, process_chunk,
+                                               mc.cores = min(ncores, n_part))
+        } else {
+          prediction_list = lapply(chunk_bounds, process_chunk)
         }
-      }
-      base::gc()
-
-      # Bind chunks into branch-level frames (chunk order is the pair order).
-      message("Summarizing theta_p of this branch.")
-      branch_result = base::list(
-        theta_p = base::do.call(base::rbind, base::lapply(prediction_list, `[[`, "theta_p")),
-        loss = base::do.call(base::rbind, base::lapply(prediction_list, `[[`, "loss"))
-      )
-      interest_cell_type_pGRN[[cell_type]][[base::paste0("branch", n)]] = branch_result
-
-      # Save the branch result.
-      if (save_check_point) {
-        message("Saving the predictive results of this branch.")
-        qs::qsave(
-          branch_result,
-          file = base::paste0("./interest_cell_type_pGRN.",
-                              base::gsub(" ", "_", cell_type), ".branch", n, ".qsave")
+        branch_result = list(
+          theta_p = do.call(rbind, lapply(prediction_list, `[[`, "theta_p")),
+          loss = do.call(rbind, lapply(prediction_list, `[[`, "loss"))
         )
+        interest_cell_type_pGRN[[cell_type]][[paste0("branch", n)]] =
+          branch_result
+      } else {
+
+        ### Memory-friendly path: persist each chunk and return paths only
+
+        # Unique logical file base for every chunk.
+        chunk_base = file.path(
+          chunk_dir,
+          sprintf("pGRN.%s.branch%d.chunk", ct_tag, n)
+        )
+
+        # Worker: compute one chunk, persist it, return path and row count.
+        process_to_disk = function(s) {
+          rows = chunk_bounds[[s]]
+          res = process_chunk(rows)
+          f = .write_qs(res, paste0(chunk_base, s))
+          list(file = f, nrow = length(rows))
+        }
+        if (ncores > 1 && n_part > 1) {
+          meta_list = parallel::mclapply(seq_len(n_part), process_to_disk,
+                                         mc.cores = min(ncores, n_part))
+        } else {
+          meta_list = lapply(seq_len(n_part), process_to_disk)
+        }
+
+        # Guard against failed workers, which mclapply may return as non-lists.
+        if (length(meta_list) != n_part ||
+            !all(vapply(meta_list, is.list, logical(1)))) {
+          stop("Chunk processing failed; reduce 'each' or 'ncores'.")
+        }
+        branch_ref = list(
+          .storage = "disk",
+          chunk_files = vapply(meta_list, `[[`, "", "file"),
+          chunk_nrow = vapply(meta_list, `[[`, integer(1), "nrow"),
+          model_cols = re_train_cols,
+          n_model = n_model,
+          n_pair = N_pred_all
+        )
+        interest_cell_type_pGRN[[cell_type]][[paste0("branch", n)]] =
+          branch_ref
+        message("Branch ", n, " streamed to ", n_part, " chunk files.")
       }
     }
   }
 
-  ### End.
-  base::setwd(original_dir)
-  message("The current working directory has been switched to: ", base::getwd(), ".")
-  t_end = base::Sys.time()
-  message("Finish: Inferring GRN. Time: ", t_end, ".")
-  message("Running time: ", base::format(t_end - t_start))
+  t_end = Sys.time()
+  message("Finish: Inferring branch GRN. Running time: ",
+          format(t_end - t_start))
   return(interest_cell_type_pGRN)
 }
