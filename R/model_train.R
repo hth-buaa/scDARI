@@ -176,7 +176,7 @@ model_train = function(
     interest_cell_type_group,
     interest_cell_type_tau,
     interest_cell_type_genes_pseudotime_info,
-    max_epochs = 1000, early_stop = 10,
+    max_epochs = 500, early_stop = 10,
     eps_theta = 1e-3, eps_loss = 1e-5,
     popSize_ga = 50, maxiter_ga = 150, pcrossover_ga = 0.5, pmutation_ga = 0.5,
     parallel_ga = FALSE, seed_ga = 123,

@@ -30,7 +30,7 @@
 #' @param retention_number_of_tops Positive integer.
 #' Maximum number of interactions kept by absolute descending \code{theta_i} rank
 #' within the initial training set.
-#' Defaults to \code{1000}.
+#' Defaults to \code{9999999}.
 #' @param refine Logical.
 #' Whether to apply mutual-top refinement.
 #' Defaults to \code{TRUE}.
@@ -144,7 +144,7 @@ select_training_set = function(
     top_n_for_max_theta_in_each_regulon = 1,
     max_theta_retention_rate_in_tops = 1,
     max_theta_retention_rate_in_all = 1,
-    retention_number_of_tops = 1000,
+    retention_number_of_tops = 9999999,
     refine = TRUE,
     keep_all_TF = TRUE,
     top_ratio_in_refine = 1,

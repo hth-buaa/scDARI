@@ -12,15 +12,20 @@
 #' providing the retained TF/TG sets (\code{Branches_TFs}, \code{Branches_TGs}) and the branch cell tables (\code{Branches}).
 #' @param replicate_time Positive integer.
 #' Number of kNN-MI replicates averaged to stabilize the estimate against the random tie-breaking noise.
-#' Defaults to \code{10}.
-#' @param k Positive integer. Number of nearest neighbors to consider to estimate the mutual information used by the Kraskov MI estimator,
+#' If \code{noise = 0}, set \code{replicate_time = 1} (results are fixed, no need for multiple runs).
+#' Otherwise, \code{replicate_time = 10} is suggested. You may reduce this number if the data size is large or to speed up execution.
+#' Defaults to \code{1}.
+#' @param k Positive integer greater than 1.
+#' Number of nearest neighbors to consider to estimate the mutual information used by the Kraskov MI estimator,
 #' passed to \code{\link[parmigene]{knnmi.cross}}.
 #' It must be smaller than the number of cells (samples) in the pooled cell-type matrix.
-#' Defaults to \code{3}.
+#' The larger the value, the longer the running time.
+#' Defaults to \code{2}.
 #' @param noise Non-negative numeric.
 #' Magnitude of the random perturbation noise added before nearest-neighbor distance computation to break ties,
 #' passed to \code{\link[parmigene]{knnmi.cross}}.
-#' Defaults to \code{1e-12}.
+#' If \code{noise = 0}, results are fixed; otherwise, results will fluctuate and \code{noise = 1e-12} is suggested.
+#' Defaults to \code{0}.
 #' @param seed Single integer passed to \code{\link[base]{set.seed}} before the MI replicates to ensure reproducibility,
 #' or \code{NULL} to leave the random number generator untouched.
 #' Defaults to \code{123}.
@@ -114,9 +119,9 @@
 calculate_iGRN = function(
     interest_cell_type_data,
     interest_cell_type_genes_pseudotime_info,
-    replicate_time = 10,
-    k = 3,
-    noise = 1e-12,
+    replicate_time = 1,
+    k = 2,
+    noise = 0,
     seed = 123,
     keep_all_edges = TRUE
 ) {

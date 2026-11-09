@@ -9,21 +9,21 @@
 #' @param interest_cell_type_Branches List. Output from \code{\link{order_pseudotime_and_divide_branches}};
 #' each cell type holds one ordered table of cells per branch.
 #' @param interest_cell_type_data List. Output from \code{\link{get_interest_cell_type_data}}.
-#' @param alpha_TF Numeric in \[0, 1\], default \code{0.63}. Quantile cutoff for TF filtering.
+#' @param alpha_TF Numeric in \[0, 1\], default \code{0.28}. Quantile cutoff for TF filtering.
 #' TFs whose importance score (TFIS) is strictly above this quantile are retained.
-#' @param alpha_TG Numeric in \[0, 1\], default \code{0.69}. Quantile cutoff for TG filtering.
+#' @param alpha_TG Numeric in \[0, 1\], default \code{0.36}. Quantile cutoff for TG filtering.
 #' TGs whose importance score (TGIS) is strictly above this quantile are retained.
 #' @param alpha_cell Numeric in \[0, 1\], default 1 (no filtering).
 #' Maximum allowed zero-expression rate (computed on the scRNA-seq counts of the retained genes);
 #' cells above this value are dropped.
-#' @param w_TFNER Numeric in \[-0.2, 1\], default \code{0.69}. Weight of the max-normalized TF non-zero expression ratio (NER) in TFIS.
+#' @param w_TFNER Numeric in \[-0.2, 1\], default \code{0.00}. Weight of the max-normalized TF non-zero expression ratio (NER) in TFIS.
 #' @param w_TFNERR Numeric in \[-0.2, 1\], default \code{1.00}. Weight of the rank-normalized TF non-zero expression ratio (NERR) in TFIS.
-#' @param w_TFNEA Numeric in \[-0.2, 1\], default \code{0.67}. Weight of the max-normalized TF mean expression in non-zero cells (NEA) in TFIS.
+#' @param w_TFNEA Numeric in \[-0.2, 1\], default \code{0.00}. Weight of the max-normalized TF mean expression in non-zero cells (NEA) in TFIS.
 #' @param w_TFNEAR Numeric in \[-0.2, 1\], default \code{0.00}. Weight of the rank-normalized TF non-zero expression average (NEAR) in TFIS.
-#' @param w_TGNER Numeric in \[-0.2, 1\], default \code{0.30}. Weight of the max-normalized TG non-zero expression ratio (NER) in TGIS.
-#' @param w_TGNERR Numeric in \[-0.2, 1\], default \code{0.88}. Weight of the rank-normalized TG non-zero expression ratio (NERR) in TGIS.
-#' @param w_TGNEA Numeric in \[-0.2, 1\], default \code{0.23}. Weight of the max-normalized TG mean expression in non-zero cells (NEA) in TGIS.
-#' @param w_TGNEAR Numeric in \[-0.2, 1\], default \code{0.12}. Weight of the rank-normalized TG non-zero expression average (NEAR) in TGIS.
+#' @param w_TGNER Numeric in \[-0.2, 1\], default \code{0.00}. Weight of the max-normalized TG non-zero expression ratio (NER) in TGIS.
+#' @param w_TGNERR Numeric in \[-0.2, 1\], default \code{1.00}. Weight of the rank-normalized TG non-zero expression ratio (NERR) in TGIS.
+#' @param w_TGNEA Numeric in \[-0.2, 1\], default \code{0.00}. Weight of the max-normalized TG mean expression in non-zero cells (NEA) in TGIS.
+#' @param w_TGNEAR Numeric in \[-0.2, 1\], default \code{0.00}. Weight of the rank-normalized TG non-zero expression average (NEAR) in TGIS.
 #' @param ncores Positive integer. Number of cores for \code{\link[parallel]{mclapply}}.
 #' Defaults to \code{1}. Fork-based parallelism is supported only on Unix-like systems;
 #' it is forced to \code{1} on Windows.
@@ -143,9 +143,9 @@
 get_genes_pseudotime_info = function(
     interest_cell_type_Branches,
     interest_cell_type_data,
-    alpha_TF = 0.63, alpha_TG = 0.69, alpha_cell = 1.00,
-    w_TFNER = 0.69, w_TFNERR = 1.00, w_TFNEA = 0.67, w_TFNEAR = 0.00,
-    w_TGNER = 0.30, w_TGNERR = 0.88, w_TGNEA = 0.23, w_TGNEAR = 0.12,
+    alpha_TF = 0.28, alpha_TG = 0.36, alpha_cell = 1.00,
+    w_TFNER = 0.00, w_TFNERR = 1.00, w_TFNEA = 0.00, w_TFNEAR = 0.00,
+    w_TGNER = 0.00, w_TGNERR = 1.00, w_TGNEA = 0.00, w_TGNEAR = 0.00,
     ncores = 1,
     sparsity_cut = NULL
 ) {

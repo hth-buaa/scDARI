@@ -2,23 +2,23 @@
 % Please edit documentation in R/filter_GRN.R
 \name{filter_GRN}
 \alias{filter_GRN}
-\title{Filter GRN by an Adjusted Quantile Threshold with TF Rescue}
+\title{Filter GRN by Feature Thresholding, Importance Scoring and TF Rescue}
 \usage{
 filter_GRN(
   interest_cell_type_pGRN,
-  theta_p_points = c(0, 0.5, 1),
-  initial_quantile_points = c(1.5, 0.9, 0.6),
-  theta_p_quantile_fit_start = list(a = 0.333333, b = 0.333333, c = -0.5),
-  factor_balance = list(FG.Loss_norm.R = 0.2, FG.theta_i.R = 0.2, F.NZER.R = 0.2,
-    F.NZEA.R = 0.2, F.EA.R = 0.2, G.NZER.R = 0.2, G.NZEA.R = 0.2, G.EA.R = 0.2),
-  factor_range = list(FG.Loss_norm.R = 0.25, FG.theta_i.R = 0.25, F.NZER.R = 0.05,
-    F.NZEA.R = 0.05, F.EA.R = 0.05, G.NZER.R = 0.15, G.NZEA.R = 0.15, G.EA.R = 0.15),
-  factor_attribute = list(FG.Loss_norm.R = "penalty", FG.theta_i.R = "relaxation",
-    F.NZER.R = "relaxation", F.NZEA.R = "relaxation", F.EA.R = "relaxation", G.NZER.R =
-    "relaxation", G.NZEA.R = "relaxation", G.EA.R = "relaxation"),
+  feat_cut_off_threshold = base::list(FG.theta_p_norm.R = 0.48, FG.Loss_norm.R = 0.63,
+    FG.theta_i.R = 0.67, F.NZER.R = 0.24, F.NZEA.R = 0.32, F.EA.R = 0.77, G.NZER.R =
+    0.23, G.NZEA.R = 0.33, G.EA.R = 0.21),
+  feat_scale_min = base::list(FG.theta_p_norm.R = 0.22, FG.Loss_norm.R = 0.55,
+    FG.theta_i.R = 0.26, F.NZER.R = 0.64, F.NZEA.R = 0.75, F.EA.R = 0.39, G.NZER.R =
+    0.56, G.NZEA.R = 0.43, G.EA.R = 0.31),
+  feat_weights = base::list(FG.theta_p_norm.R = 0.25, FG.Loss_norm.R = 0, FG.theta_i.R =
+    0.26, F.NZER.R = 0.15, F.NZEA.R = 0.11, F.EA.R = 0.09, G.NZER.R = 0.03, G.NZEA.R =
+    0.07, G.EA.R = 0.04),
+  IS_quan_cut_off = 0.02,
   rescue_TF = TRUE,
   min_TG_per_TF = 1,
-  TF_rescue_quantile_threshold = 0.1
+  TF_rescue_quantile_threshold = 0
 )
 }
 \arguments{
@@ -26,88 +26,103 @@ filter_GRN(
 \code{\link{select_best_prediction}}, named by cell type and containing
 \code{pred_summary}.}
 
-\item{theta_p_points}{Numeric vector, default \code{c(0, 0.5, 1)}.
-Predicted-strength anchor points for fitting the initial threshold curve.}
+\item{feat_cut_off_threshold}{Named list of nine numeric values in
+\code{[0, 1]}. Names are the features used throughout the function.
+Each value is a quantile probability: for that feature, pairs below
+the corresponding quantile are set to zero. Larger values remove more
+low-ranked pairs. Closely related to \code{feat_scale_min}, which rescales
+the values that survive this cutoff, and to \code{feat_weights},
+whose names must match these names.}
 
-\item{initial_quantile_points}{Numeric vector, default
-\code{c(1.5, 0.9, 0.6)}. Initial-threshold anchor values aligned
-positionally to \code{theta_p_points}.}
+\item{feat_scale_min}{Named list of nine numeric values in \code{[0, 1]}.
+After truncation, the positive values of a feature are min-max rescaled
+onto \code{[feat_scale_min, 1]}, so this value is the smallest score
+retained by a positive feature. A value of \code{0} keeps the natural
+minimum at zero, whereas \code{1} collapses all positive values to one.
+Related to \code{feat_cut_off_threshold}, which determines which values
+are positive before rescaling.}
 
-\item{theta_p_quantile_fit_start}{Named list, default
-\code{list(a = 0.333333, b = 0.333333, c = -0.5)}. Starting values
-\code{a}, \code{b}, \code{c} for the nonlinear least-squares fit.}
+\item{feat_weights}{Named list of nine numeric values in \code{[0, 1]},
+which sums to one. Each value is the weight of its feature in the weighted
+sum that forms the importance score. The weights should be normalized to
+sum to one so the score stays on the feature scale; the function does not
+enforce this, and a non-unit sum only rescales the importance score without
+changing its ranking. Names must match those of
+\code{feat_cut_off_threshold}.}
 
-\item{factor_balance}{Named list. Center value \code{fb} of each
-adjustment feature. Names must match those of \code{factor_range} and
-\code{factor_attribute}.}
+\item{IS_quan_cut_off}{Numeric in \code{[0, 1]}, default \code{0.02}.
+Quantile probability of the importance score: pairs whose score is below
+this quantile are rejected. Larger values retain fewer edges. Drives
+\code{filter_keep} and interacts with the TF rescue step.}
 
-\item{factor_range}{Named list. Strength \code{fr} of each adjustment
-feature.}
+\item{rescue_TF}{Logical, default \code{TRUE}. Whether to run the TF rescue
+step after the importance-score cutoff. When \code{FALSE},
+\code{min_TG_per_TF} and \code{TF_rescue_quantile_threshold} are unused.}
 
-\item{factor_attribute}{Named list. Direction of each feature, either
-\code{"relaxation"} or \code{"penalty"}.}
-
-\item{rescue_TF}{Logical, default \code{TRUE}. Whether to run the TF
-rescue step.}
-
-\item{min_TG_per_TF}{Positive integer, default \code{1}. Minimum number
-of targets kept per TF after rescue.}
+\item{min_TG_per_TF}{Positive integer, default \code{1}. Minimum number of
+targets kept for each TF after rescue. Only relevant when
+\code{rescue_TF = TRUE}.}
 
 \item{TF_rescue_quantile_threshold}{Numeric in \code{[0, 1]}, default
-\code{0.1}. Pooled low quantile of \code{FG.theta_p_norm.R}; rescue
-candidates below it are rejected.}
+\code{0.00}. Pooled low quantile of \code{FG.theta_p_norm.R} among rescue
+candidates; candidates below it are rejected. Only relevant when
+\code{rescue_TF = TRUE}.}
 }
 \value{
 The input list with the following per cell type:
 \itemize{
-\item \code{pred_summary}: the original frame augmented with the initial
-threshold \code{IT}, one \code{<feature>-F} column per feature, the
-adjusted threshold \code{AT}, and the logical columns
-\code{filter_keep}, \code{rescue_keep} and \code{keep}.
+\item \code{pred_summary}: the original frame augmented with one
+\code{<feature>.C} prepared column per feature, the importance score
+\code{IS}, and the logical columns \code{filter_keep},
+\code{rescue_keep} and \code{keep}.
 \item \code{pred_summary_loose}: rows with \code{keep = TRUE}.
 \item \code{pred_summary_strict}: complete cases of the loose set,
 obtained with \code{\link[stats]{na.omit}}.
 }
 }
 \description{
-Converts the continuous predictions into a final edge set with
-an adaptive threshold rather than one fixed global cutoff. A decreasing
-initial threshold curve is fitted from anchor points, then adjusted per
-pair by relaxation and penalty factors built from normalized rank features.
-Pairs whose normalized strength rank reaches the adjusted threshold are
-kept, and a TF rescue step ensures each TF retains a minimum number of
-targets. Loose and strict filtered sets are produced.
+Converts the continuous predictions into a final edge set without
+fitting a global threshold curve. Each normalized feature is first aligned to
+a common direction, truncated at a per-feature quantile and rescaled over its
+positive values. The prepared features are combined into a single importance
+score, whose high quantile defines the retained edges, and a TF rescue step
+guarantees a minimum number of targets per regulator. Loose and strict
+filtered sets are returned.
 }
 \details{
 For each cell type the function proceeds as follows.
 \enumerate{
-\item Fits the initial threshold curve
-\eqn{\mathrm{IT} = 1/(a\,\theta_p + b) + c} from the anchor points
-with \eqn{a > 0}, and evaluates \code{IT} from \code{FG.theta_p}.
-\item For each feature, computes its factor as
-\eqn{1 + f_r(f_b - v)} for relaxation and
-\eqn{1 + f_r(v - f_b)} for penalty.
-\item Forms the adjusted threshold as the product of \code{IT} and all
-factors on the log scale, clamps non-positive values, and clamps
-\code{AT} to \code{[0, 1]}.
-\item Sets \code{filter_keep} when
-\code{FG.theta_p_norm.R >= AT}.
-\item If rescue is enabled, ranks pairs within each TF by a priority
+\item Aligns feature directions: \code{FG.Loss_norm.R} is the only
+lower-is-better feature and is transformed to \code{1 - value}; the other
+features are used unchanged.
+\item For each feature, computes its cutoff quantile and sets the lower
+tail to zero.
+\item Min-max rescales the surviving positive values onto
+\code{[feat_scale_min, 1]}, producing the \code{.C} columns.
+\item Forms the importance score as a weighted sum of the \code{.C}
+columns.
+\item Sets \code{filter_keep} for pairs at or above the importance-score
+quantile.
+\item If rescue is enabled, ranks pairs within each TF by a fixed priority
 order and rescues top candidates until the TF has
-\code{min_TG_per_TF} kept targets, rejecting candidates below the
-pooled low quantile.
-\item Builds the loose set from \code{keep = filter_keep | rescue_keep},
-and the strict set by removing rows containing missing values.
+\code{min_TG_per_TF} kept targets, rejecting candidates below the pooled
+low quantile.
+\item Builds the loose set from
+\code{keep = filter_keep | rescue_keep}, and the strict set by removing
+rows containing missing values.
 }
 }
 \note{
 \itemize{
 \item The function enters the \code{5 Infer GRN} folder and restores the
 original working directory on exit, including on error.
-\item \code{factor_balance}, \code{factor_range} and
-\code{factor_attribute} must use identical names.
-\item \code{IT} may exceed 1 for weak predicted strengths; after
-clamping those pairs face \code{AT = 1} and are filtered out.
+\item \code{feat_cut_off_threshold}, \code{feat_scale_min} and
+\code{feat_weights} must use identical feature names.
+\item All quantiles use the default sample quantile method
+(\code{stats::quantile}, type 7).
+\item The feature preparation is vectorized over a single numeric matrix
+and the rescue step uses integer tabulation, avoiding repeated whole-table
+copies while preserving the same numerical output.
 }
 }
 \examples{

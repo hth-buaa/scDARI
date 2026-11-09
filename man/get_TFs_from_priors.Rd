@@ -8,10 +8,10 @@ get_TFs_from_priors(
   scRNAseq,
   genome_assembly = "hg38",
   min_TF_nonzero_freq = 0.05,
-  min_TF_nonzero_mean = 0,
-  min_TF_overall_mean = 0,
-  min_TF_nonzero_freq_quantile = 0,
-  min_TF_nonzero_mean_quantile = 0,
+  min_TF_nonzero_mean = 0.1,
+  min_TF_overall_mean = 0.05,
+  min_TF_nonzero_freq_quantile = 0.01,
+  min_TF_nonzero_mean_quantile = 0.01,
   min_TF_overall_mean_quantile = 0,
   timeout = 60,
   distance_from_TSS = 10,
@@ -19,9 +19,9 @@ get_TFs_from_priors(
   excluded_cell_types_in_priors = "NotExclude",
   ignore_case_when_filtering_priors = TRUE,
   intensity_scale_factor = 0.5,
-  prior_min_TG_number = 2000,
-  prior_top_n_keep = 5000,
-  prior_top_q_keep = 0.7
+  prior_min_TG_number = 100,
+  prior_top_n_keep = 18900,
+  prior_top_q_keep = 1
 )
 }
 \arguments{
@@ -35,15 +35,15 @@ Supported: \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}, \code{"rn6
 
 \item{min_TF_nonzero_freq}{Numeric between 0 and 1. Minimum absolute non-zero cell frequency. Defaults to \code{0.05}.}
 
-\item{min_TF_nonzero_mean}{Numeric. Minimum absolute mean expression in non-zero cells. Defaults to \code{0} (no filter).}
+\item{min_TF_nonzero_mean}{Numeric. Minimum absolute mean expression in non-zero cells. Defaults to \code{0.10}.}
 
-\item{min_TF_overall_mean}{Numeric. Minimum absolute mean expression across all cells. Defaults to \code{0} (no filter).}
+\item{min_TF_overall_mean}{Numeric. Minimum absolute mean expression across all cells. Defaults to \code{0.05}.}
 
-\item{min_TF_nonzero_freq_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of non-zero cell frequency. Defaults to \code{0} (no filter).}
+\item{min_TF_nonzero_freq_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of non-zero cell frequency. Defaults to \code{0.01}.}
 
-\item{min_TF_nonzero_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of mean expression in non-zero cells. Defaults to \code{0} (no filter).}
+\item{min_TF_nonzero_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of mean expression in non-zero cells. Defaults to \code{0.01}.}
 
-\item{min_TF_overall_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of overall mean expression. Defaults to \code{0} (no filter).}
+\item{min_TF_overall_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of overall mean expression. Defaults to \code{0.00} (no filter).}
 
 \item{timeout}{Positive numeric, time in seconds allowed for a single ChIP-Atlas file download before it is treated as failed.
 Temporarily passed to \code{\link[base]{options}} via \code{options(timeout = ...)} during downloading and restored to the original value afterwards.
@@ -66,14 +66,14 @@ Smaller values compress the intensity distribution more strongly.
 Defaults to \code{0.5} (square-root transform).}
 
 \item{prior_min_TG_number}{Positive integer, minimum number of valid target genes required to retain a TF prior.
-TFs with fewer targets after filtering are discarded. Defaults to \code{2000}.}
+TFs with fewer targets after filtering are discarded. Defaults to \code{100}.}
 
 \item{prior_top_n_keep}{Positive integer, maximum number of top target genes to retain per TF in the simplified prior table.
-Defaults to \code{5000}.}
+Defaults to \code{18900}.}
 
 \item{prior_top_q_keep}{Numeric between 0 and 1, proportional cap of top target genes to retain per TF.
 The actual retained count is \code{max(1, round(min(prior_top_n_keep, nrow(prior) * prior_top_q_keep)))}.
-Defaults to \code{0.7}.}
+Defaults to \code{1.00}.}
 }
 \value{
 Sorted character vector of TF gene symbols that pass all screening layers.

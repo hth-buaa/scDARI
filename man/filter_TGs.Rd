@@ -7,7 +7,7 @@
 filter_TGs(
   scRNAseq,
   forced_feature_calculation = FALSE,
-  min_TG_nonzero_freq = 0.05,
+  min_TG_nonzero_freq = 0.01,
   min_TG_nonzero_mean = 0,
   min_TG_overall_mean = 0,
   min_TG_nonzero_freq_quantile = 0,
@@ -23,17 +23,17 @@ used for target gene expression quantification and quality screening.}
 If \code{TRUE}, force recomputation of gene expression features and overwrite the cached RDS file.
 Defaults to \code{FALSE}: the cached \code{TG_features_all.rds} is loaded when available to skip the computationally expensive feature calculation step.}
 
-\item{min_TG_nonzero_freq}{Numeric between 0 and 1. Minimum absolute non-zero cell frequency. Defaults to \code{0.05}.}
+\item{min_TG_nonzero_freq}{Numeric between 0 and 1. Minimum absolute non-zero cell frequency. Defaults to \code{0.01}.}
 
-\item{min_TG_nonzero_mean}{Numeric. Minimum absolute mean expression in non-zero cells. Defaults to \code{0} (no filter).}
+\item{min_TG_nonzero_mean}{Numeric. Minimum absolute mean expression in non-zero cells. Defaults to \code{0.00} (no filter).}
 
-\item{min_TG_overall_mean}{Numeric. Minimum absolute mean expression across all cells. Defaults to \code{0} (no filter).}
+\item{min_TG_overall_mean}{Numeric. Minimum absolute mean expression across all cells. Defaults to \code{0.00} (no filter).}
 
-\item{min_TG_nonzero_freq_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of non-zero cell frequency. Defaults to \code{0} (no filter).}
+\item{min_TG_nonzero_freq_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of non-zero cell frequency. Defaults to \code{0.00} (no filter).}
 
-\item{min_TG_nonzero_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of mean expression in non-zero cells. Defaults to \code{0} (no filter).}
+\item{min_TG_nonzero_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of mean expression in non-zero cells. Defaults to \code{0.00} (no filter).}
 
-\item{min_TG_overall_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of overall mean expression. Defaults to \code{0} (no filter).}
+\item{min_TG_overall_mean_quantile}{Numeric between 0 and 1. Minimum genome-wide quantile of overall mean expression. Defaults to \code{0.00} (no filter).}
 }
 \value{
 Sorted character vector of target gene symbols that pass all expression quality thresholds.

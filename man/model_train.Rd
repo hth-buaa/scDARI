@@ -10,7 +10,7 @@ model_train(
   interest_cell_type_group,
   interest_cell_type_tau,
   interest_cell_type_genes_pseudotime_info,
-  max_epochs = 1000,
+  max_epochs = 500,
   early_stop = 10,
   eps_theta = 0.001,
   eps_loss = 1e-05,

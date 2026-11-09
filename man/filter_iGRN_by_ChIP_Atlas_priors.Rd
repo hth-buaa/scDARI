@@ -6,11 +6,11 @@
 \usage{
 filter_iGRN_by_ChIP_Atlas_priors(
   interest_cell_type_iGRN,
-  min_scale = 1,
-  theta_i_top_quantile = 0.15,
-  theta_i_top_n = 50,
-  theta_i_absolute_min = 0.05,
-  TG_rescue_number = 1,
+  min_scale = 0.99,
+  theta_i_top_quantile = 1,
+  theta_i_top_n = 3000,
+  theta_i_absolute_min = 0,
+  TG_rescue_number = 0,
   ncores = 1
 )
 }
@@ -18,25 +18,26 @@ filter_iGRN_by_ChIP_Atlas_priors(
 \item{interest_cell_type_iGRN}{Named list. Output of \code{\link{calculate_iGRN}}; each element
 is a target gene (rows) by TF (columns) association matrix (data frame or matrix).}
 
-\item{min_scale}{Positive numeric, typically in (0, 1], default \code{1}. Multiplier applied to
+\item{min_scale}{Positive numeric, typically in (0, 1], default \code{0.99}. Multiplier applied to
 the positive minimum when building the min-max lower bound, used both before and after prior
 correction. With \code{min_scale = 1} the weakest positive edge of each TF is mapped to zero;
 values below 1 keep it positive.}
 
 \item{theta_i_top_quantile}{Numeric in (0, 1]. Global quantile cutoff; edges whose corrected
 score is at or above the \code{1 - theta_i_top_quantile} quantile are retained.
-Defaults to \code{0.15} (global top 15\%).}
+Defaults to \code{1.00} (global top 100\%, retain all).}
 
 \item{theta_i_top_n}{Positive integer. Per-TF top-N cutoff; the top \code{theta_i_top_n} targets
-of each TF are retained regardless of the global threshold. Defaults to \code{50}.}
+of each TF are retained regardless of the global threshold. Defaults to \code{3000}.}
 
 \item{theta_i_absolute_min}{Non-negative numeric. Score floor applied after the square-root
-transform (before re-normalization); values below it are set to zero. Defaults to \code{0.05}.}
+transform (before re-normalization); values below it are set to zero. Set \code{0} to disable.
+Defaults to \code{0.00}.}
 
 \item{TG_rescue_number}{Non-negative integer. Minimum number of TF regulators guaranteed for
 each target gene after dual-threshold QC. TGs with fewer non-zero edges have their top pre-QC
 (post-correction) edges restored. Internally capped at the number of TFs. Set \code{0} to disable.
-Defaults to \code{1}.}
+Defaults to \code{0}.}
 
 \item{ncores}{Positive integer. Number of cores for parallel processing via
 \code{\link[parallel]{mclapply}}.

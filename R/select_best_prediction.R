@@ -27,22 +27,23 @@
 #' @param interest_cell_type_tau Named numeric vector. Output of
 #'   \code{\link{get_cell_type_tau}}. One tau per cell type, used as the lower
 #'   shift when normalizing strengths within a TF.
-#' @param topn_max Positive integer, default \code{25}. Upper bound on the
-#'   number of models averaged per pair. Related to \code{topn_min} and
-#'   \code{topn_ratio}, which jointly determine the effective count.
-#' @param topn_min Positive integer, default \code{5}. Lower bound on the
-#'   number of models averaged per pair.
-#' @param topn_ratio Numeric in \code{(0, 1]}, default \code{0.1}. The
+#' @param topn_max Positive integer greater than or equal to \code{topn_min},
+#'   default \code{1}. Upper bound on the number of models averaged per pair.
+#'   Related to \code{topn_min} and \code{topn_ratio}, which jointly determine
+#'   the effective count.
+#' @param topn_min Positive integer less than or equal to \code{topn_max},
+#'   default \code{1}. Lower bound on the number of models averaged per pair.
+#' @param topn_ratio Numeric in \code{(0, 1]}, default \code{0.20}. The
 #'   effective count is \code{round(n_model * topn_ratio)}, then clamped to
 #'   \code{[topn_min, topn_max]} and never above the number of models.
-#' @param fix_factor Numeric in \code{(0, 1]}, default \code{1.0}. Factor
+#' @param fix_factor Numeric in \code{(0, 1]}, default \code{1.00}. Factor
 #'   applied to the weights of boundary strengths (below 0.0101 or above
 #'   0.9899), which reflect the optimization bounds. \code{1} means no
 #'   down-weighting.
-#' @param min_scale Numeric in \code{[0, 1]}, default \code{0.99}. Multiplies
+#' @param min_scale Numeric in \code{[0, 1]}, default \code{0.00}. Multiplies
 #'   the smallest positive value when setting the within-TF min-max lower
 #'   bound. Related to \code{max_scale}, which sets the upper bound.
-#' @param max_scale Numeric \code{>= 1}, default \code{1.01}. Multiplies the
+#' @param max_scale Numeric \code{>= 1}, default \code{1.00}. Multiplies the
 #'   maximum value (plus a small offset) when setting the upper bound.
 #' @param each Positive integer, default \code{1000000}. Retained for
 #'   interface compatibility; the streaming path is driven by chunk files.
@@ -92,12 +93,12 @@ select_best_prediction = function(
     interest_cell_type_iGRN,
     Basic_Info,
     interest_cell_type_tau,
-    topn_max = 25,
-    topn_min = 5,
-    topn_ratio = 0.1,
-    fix_factor = 1.0,
-    min_scale = 0.99,
-    max_scale = 1.01,
+    topn_max = 1,
+    topn_min = 1,
+    topn_ratio = 0.20,
+    fix_factor = 1.00,
+    min_scale = 0.00,
+    max_scale = 1.00,
     each = 1000000,
     ncores = 1
 ) {
