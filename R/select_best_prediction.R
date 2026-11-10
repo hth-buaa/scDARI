@@ -285,13 +285,11 @@ select_best_prediction = function(
                                   TF = pred_summary$TF, v = value)
 
       # Positive minimum cmin and maximum cmax per TF (cmin = Inf if none).
-      # dt[, data.table::`:=`(
       dt[, `:=`(
         .cmin = { p = v[v > 0 & !is.na(v)]; if (length(p)) min(p) else Inf },
         .cmax = suppressWarnings(max(v, na.rm = TRUE))
       ), by = TF]
       dt[, .active := .cmax > 0]
-      # dt[, data.table::`:=`(.active, .cmax > 0)]
       min_before = dt$.cmin * min_scale
       max_before = (dt$.cmax + 0.0001) * max_scale
       denom = max_before - min_before
@@ -319,8 +317,10 @@ select_best_prediction = function(
     }
     pred_summary$FG.theta_p_norm.R = rank_over_positive(
       pred_summary$FG.theta_p_norm, zero_rank = 0)
+    # pred_summary$FG.Loss_norm.R = rank_over_positive(
+    #   pred_summary$FG.Loss_norm, zero_rank = NA_real_)
     pred_summary$FG.Loss_norm.R = rank_over_positive(
-      pred_summary$FG.Loss_norm, zero_rank = NA_real_)
+      pred_summary$FG.Loss_norm, zero_rank = 0)
 
     ### Attach observed theta_i and its rank
     message("Attaching observed theta_i and its rank.")
